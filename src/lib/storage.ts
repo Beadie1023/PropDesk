@@ -5,23 +5,23 @@ const TRADES_KEY = 'propdesk:trades';
 const SEED_FLAG_KEY = 'propdesk:seeded';
 
 const SEED_ACCOUNTS: Account[] = [
-  {
-    id: 'acc-ember',
-    name: 'Ember',
-    lots: 0.16,
-    pip_value: 8.0,
-    daily_loss_limit: 80,
-    starting_balance: 10000,
-    balance: 10250,
-    daily_pnl: -55,
-    payout_split: 0.99,
-    payout_cycle: 'every_5_days',
-    payout_flat_fee: 19.9,
-    payout_crypto_fee_pct: 0.0249,
-    funded_date: '2026-08-04',
-    projected_profit: 600,
-    sort_order: 1,
-  },
+{
+ id: 'ember-upcomers',
+ name: 'Ember',
+ firm: 'Upcomers',
+ type: 'Instant Funded',
+ balance: 2000,
+ startingBalance: 2000,
+ highWaterMark: 2000,
+ floorBalance: 1920,
+ maxDrawdownPercent: 4,
+ profitSplit: 80,
+ minTradingDays: 5,
+ consistencyLimit: 20,
+ phase: 'Ongoing',
+ startDate: '2026-07-30',
+ status: 'active'
+}
   {
     id: 'acc-alpha',
     name: 'Alpha Capital',
