@@ -1,15 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
+  AlertTriangle,
   BookOpen,
+  CheckCircle2,
   Plus,
   Target,
   Trash2,
   TrendingDown,
   TrendingUp,
+  Upload,
   X,
 } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { RR_OPTIONS, formatCurrency, formatPrice } from '@/lib/trading';
+import { parseMT5Csv, type ParsedImportResult } from '@/lib/csvImport';
 import type { Account, Trade } from '@/types';
 
 export function SessionJournal({
@@ -17,13 +21,17 @@ export function SessionJournal({
   accounts,
   onAddTrade,
   onDeleteTrade,
+  onImportTrades,
 }: {
   trades: Trade[];
   accounts: Account[];
   onAddTrade: (trade: Omit<Trade, 'id'>) => Promise<void>;
   onDeleteTrade: (id: string) => Promise<void>;
+  onImportTrades: (trades: Omit<Trade, 'id'>[], accountId: string) => Promise<void>;
 }) {
   const [showForm, setShowForm] = useState(false);
+  const [importResult, setImportResult] = useState<ParsedImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const stats = useMemo(() => {
     const wins = trades.filter((t) => t.result === 'win');
@@ -50,19 +58,48 @@ export function SessionJournal({
     };
   }, [trades]);
 
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      setImportResult(parseMT5Csv(text));
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <Panel
       title="Session Journal"
       subtitle="Trade log with running win rate and P&L analytics"
       icon={<BookOpen className="h-5 w-5" />}
       action={
-        <button
-          onClick={() => setShowForm(true)}
-          className="btn-primary"
-        >
-          <Plus className="h-4 w-4" />
-          Log Trade
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            className="hidden"
+            onChange={handleFileSelected}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="btn-ghost"
+          >
+            <Upload className="h-4 w-4" />
+            Import MT5 CSV
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="btn-primary"
+          >
+            <Plus className="h-4 w-4" />
+            Log Trade
+          </button>
+        </div>
       }
     >
       {/* Summary stats */}
@@ -103,6 +140,8 @@ export function SessionJournal({
               <th className="text-left font-medium px-3 py-3">Dir</th>
               <th className="text-center font-medium px-3 py-3">R:R</th>
               <th className="text-right font-medium px-3 py-3">Entry</th>
+              <th className="text-right font-medium px-3 py-3">Close</th>
+              <th className="text-right font-medium px-3 py-3">Lots</th>
               <th className="text-right font-medium px-3 py-3">SL</th>
               <th className="text-right font-medium px-3 py-3">TP1</th>
               <th className="text-right font-medium px-3 py-3">TP2</th>
@@ -116,8 +155,8 @@ export function SessionJournal({
           <tbody className="divide-y divide-ink-700/40">
             {trades.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center py-12 text-steel-400 text-sm">
-                  No trades logged yet. Click "Log Trade" to add your first entry.
+                <td colSpan={15} className="text-center py-12 text-steel-400 text-sm">
+                  No trades logged yet. Click "Log Trade" or "Import MT5 CSV" to add your first entry.
                 </td>
               </tr>
             )}
@@ -152,19 +191,25 @@ export function SessionJournal({
                   </span>
                 </td>
                 <td className="px-3 py-3 text-center stat-value text-slate-300">
-                  {trade.rr_used}
+                  {trade.source === 'mt5_import' ? '—' : trade.rr_used}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-slate-300">
                   {formatPrice(trade.entry_price)}
                 </td>
+                <td className="px-3 py-3 text-right stat-value text-slate-300">
+                  {trade.close_price !== undefined ? formatPrice(trade.close_price) : '—'}
+                </td>
+                <td className="px-3 py-3 text-right stat-value text-slate-300">
+                  {trade.lots !== undefined ? trade.lots.toFixed(2) : '—'}
+                </td>
                 <td className="px-3 py-3 text-right stat-value text-bear-400/80">
-                  {formatPrice(trade.sl)}
+                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.sl)}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-bull-400/80">
-                  {formatPrice(trade.tp1)}
+                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.tp1)}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-bull-400/80">
-                  {formatPrice(trade.tp2)}
+                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.tp2)}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <span
@@ -215,7 +260,147 @@ export function SessionJournal({
           }}
         />
       )}
+
+      {importResult && (
+        <ImportCsvModal
+          result={importResult}
+          accounts={accounts}
+          onClose={() => setImportResult(null)}
+          onConfirm={async (accountId, accountName) => {
+            const tradesWithAccount = importResult.trades.map((t) => ({
+              ...t,
+              account_name: accountName,
+            }));
+            await onImportTrades(tradesWithAccount, accountId);
+            setImportResult(null);
+          }}
+        />
+      )}
     </Panel>
+  );
+}
+
+function ImportCsvModal({
+  result,
+  accounts,
+  onClose,
+  onConfirm,
+}: {
+  result: ParsedImportResult;
+  accounts: Account[];
+  onClose: () => void;
+  onConfirm: (accountId: string, accountName: string) => Promise<void>;
+}) {
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
+  const [importing, setImporting] = useState(false);
+
+  const netProfit = result.trades.reduce((s, t) => s + t.dollar_amount, 0);
+  const selectedAccount = accounts.find((a) => a.id === accountId);
+
+  const handleConfirm = async () => {
+    if (!selectedAccount || result.trades.length === 0) return;
+    setImporting(true);
+    await onConfirm(selectedAccount.id, selectedAccount.name);
+    setImporting(false);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 backdrop-blur-sm p-6"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700/60 text-accent-400">
+              <Upload className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-100">Import MT5 CSV</h3>
+              <p className="text-xs text-steel-400">Review before adding to the journal</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-steel-400 hover:text-slate-100 hover:bg-ink-700/60 transition"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {result.trades.length > 0 ? (
+            <div className="flex items-start gap-2.5 rounded-lg border border-bull-500/30 bg-bull-500/10 p-3.5">
+              <CheckCircle2 className="h-4 w-4 text-bull-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-bull-300 leading-relaxed">
+                Parsed <span className="stat-value font-semibold">{result.trades.length}</span> trade
+                {result.trades.length === 1 ? '' : 's'} · net{' '}
+                <span className="stat-value font-semibold">{formatCurrency(netProfit)}</span>
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-2.5 rounded-lg border border-bear-500/30 bg-bear-500/10 p-3.5">
+              <AlertTriangle className="h-4 w-4 text-bear-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-bear-300 leading-relaxed">
+                No importable trades found in this file.
+              </p>
+            </div>
+          )}
+
+          {result.skippedRows > 0 && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-warn-500/30 bg-warn-500/10 p-3.5">
+              <AlertTriangle className="h-4 w-4 text-warn-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-warn-300 leading-relaxed">
+                Skipped {result.skippedRows} row{result.skippedRows === 1 ? '' : 's'} (headers, balance
+                operations, or rows that couldn't be parsed).
+              </p>
+            </div>
+          )}
+
+          {result.errors.length > 0 && (
+            <div className="rounded-lg border border-ink-600/40 bg-ink-900/40 p-3 max-h-32 overflow-y-auto scrollbar-thin">
+              {result.errors.map((err, i) => (
+                <p key={i} className="text-[11px] text-steel-500 leading-relaxed">
+                  {err}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {result.trades.length > 0 && (
+            <Field label="Import Into Account">
+              <select
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value)}
+                className="input-field"
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50">
+          <button onClick={onClose} className="btn-ghost">
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={result.trades.length === 0 || !accountId || importing}
+            className="btn-primary"
+          >
+            {importing ? 'Importing…' : `Import ${result.trades.length} Trade${result.trades.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
