@@ -32,6 +32,9 @@ export type Trade = {
   dollar_amount: number;
   notes: string;
   account_name: string;
+  close_price?: number;
+  lots?: number;
+  source?: 'manual' | 'mt5_import';
 };
 
 export type RiskStatus = 'green' | 'yellow' | 'red';
