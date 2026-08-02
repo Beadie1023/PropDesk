@@ -1,19 +1,21 @@
 export type Account = {
   id: string;
   name: string;
-  lots: number;
-  pip_value: number;
-  daily_loss_limit: number;
-  starting_balance: number;
+  firm: string;
+  type: string;
   balance: number;
-  daily_pnl: number;
-  payout_split: number;
-  payout_cycle: 'every_5_days' | 'weekly' | 'every_14_days';
-  payout_flat_fee: number;
-  payout_crypto_fee_pct: number;
-  funded_date: string;
-  projected_profit: number;
-  sort_order: number;
+  startingBalance: number;
+  highWaterMark: number;
+  floorBalance: number;
+  maxDrawdownPercent: number;
+  profitSplit: number;
+  minTradingDays: number;
+  consistencyLimit: number;
+  phase: string;
+  startDate: string;
+  status: 'active' | 'inactive' | 'breached';
+  lots: number;
+  pipValue: number;
 };
 
 export type Trade = {
@@ -36,11 +38,10 @@ export type RiskStatus = 'green' | 'yellow' | 'red';
 
 export type RRKey = '1:2' | '1:3' | '1:4';
 
-export type PayoutEntry = {
-  date: Date;
+export type PayoutEstimate = {
+  accountId: string;
   accountName: string;
-  gross: number;
-  net: number;
-  fee: number;
+  grossProfit: number;
   splitAmount: number;
+  eligible: boolean;
 };
