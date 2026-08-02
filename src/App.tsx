@@ -8,7 +8,7 @@ import {
   LineChart,
 } from 'lucide-react';
 import { usePropDeskData } from '@/hooks/usePropDeskData';
-import { LoadingBlock, Panel } from '@/components/ui';
+import { LoadingBlock } from '@/components/ui';
 import { formatCurrency } from '@/lib/trading';
 import { TradeCalculator } from '@/components/TradeCalculator';
 import { PayoutTracker } from '@/components/PayoutTracker';
@@ -37,7 +37,7 @@ function App() {
     [accounts],
   );
   const portfolioPnl = useMemo(
-    () => accounts.reduce((s, a) => s + a.daily_pnl, 0),
+    () => accounts.reduce((s, a) => s + (a.balance - a.startingBalance), 0),
     [accounts],
   );
 
@@ -82,7 +82,7 @@ function App() {
               <div className="h-8 w-px bg-ink-600/50" />
               <div className="text-right">
                 <p className="text-[10px] text-steel-400 uppercase tracking-wider">
-                  Daily P&amp;L
+                  Unrealized P&amp;L
                 </p>
                 <p
                   className={`stat-value text-sm font-semibold ${
