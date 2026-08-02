@@ -1,4 +1,4 @@
-import type { Account, PayoutEstimate, RRKey, RiskStatus } from '@/types';
+import type { Account, PayoutEstimate, RRKey, RiskStatus, Trade } from '@/types';
 
 export const PIP = 0.0001;
 
@@ -143,3 +143,62 @@ export const estimatePayout = (account: Account): PayoutEstimate => {
 
 export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
   entries.reduce((sum, e) => sum + e.splitAmount, 0);
+
+/**
+ * Counts distinct calendar dates on which the account logged at least one
+ * trade. Reads straight from the trades in storage — not a stored counter.
+ */
+export const tradingDaysCompleted = (accountName: string, trades: Trade[]): number => {
+  const dates = new Set(
+    trades.filter((t) => t.account_name === accountName).map((t) => t.trade_date),
+  );
+  return dates.size;
+};
+
+export type ConsistencyCheck = {
+  accountName: string;
+  totalProfit: number;
+  maxDayProfit: number;
+  maxDayDate: string | null;
+  maxDayPercent: number;
+  limit: number;
+  breached: boolean;
+};
+
+/**
+ * Consistency rule: no single calendar day's profit may account for more
+ * than the account's consistencyLimit percentage of total profit across all
+ * trading days. Recompute this after every trade is logged.
+ */
+export const checkConsistency = (account: Account, trades: Trade[]): ConsistencyCheck => {
+  const accountTrades = trades.filter((t) => t.account_name === account.name);
+
+  const dailyTotals = new Map<string, number>();
+  for (const t of accountTrades) {
+    dailyTotals.set(t.trade_date, (dailyTotals.get(t.trade_date) ?? 0) + t.dollar_amount);
+  }
+
+  const totalProfit = [...dailyTotals.values()].reduce((sum, v) => sum + v, 0);
+
+  let maxDayProfit = 0;
+  let maxDayDate: string | null = null;
+  for (const [date, profit] of dailyTotals.entries()) {
+    if (profit > maxDayProfit) {
+      maxDayProfit = profit;
+      maxDayDate = date;
+    }
+  }
+
+  const maxDayPercent = totalProfit > 0 ? (maxDayProfit / totalProfit) * 100 : 0;
+  const breached = totalProfit > 0 && maxDayPercent > account.consistencyLimit;
+
+  return {
+    accountName: account.name,
+    totalProfit,
+    maxDayProfit,
+    maxDayDate,
+    maxDayPercent,
+    limit: account.consistencyLimit,
+    breached,
+  };
+};
