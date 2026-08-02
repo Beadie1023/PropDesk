@@ -142,10 +142,10 @@ function App() {
 
         {view === 'overview' && (
           <div className="space-y-6">
-            <AccountDashboard accounts={accounts} />
+            <AccountDashboard accounts={accounts} trades={trades} />
             <div className="grid grid-cols-2 gap-6">
               <TradeCalculator accounts={accounts} />
-              <RiskAlertPanel accounts={accounts} />
+              <RiskAlertPanel accounts={accounts} trades={trades} />
             </div>
             <PayoutTracker accounts={accounts} />
             <SessionJournal
@@ -163,9 +163,9 @@ function App() {
 
         {view === 'payouts' && <PayoutTracker accounts={accounts} />}
 
-        {view === 'accounts' && <AccountDashboard accounts={accounts} />}
+        {view === 'accounts' && <AccountDashboard accounts={accounts} trades={trades} />}
 
-        {view === 'risk' && <RiskAlertPanel accounts={accounts} />}
+        {view === 'risk' && <RiskAlertPanel accounts={accounts} trades={trades} />}
 
         {view === 'journal' && (
           <SessionJournal
