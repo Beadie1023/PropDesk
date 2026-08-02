@@ -1,10 +1,22 @@
 import { useMemo } from 'react';
-import { AlertOctagon, AlertTriangle, ShieldCheck, Square } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Square } from 'lucide-react';
 import { Panel, StatusDot } from '@/components/ui';
-import { drawdownBufferRemaining, drawdownPct, formatCurrency, riskStatus } from '@/lib/trading';
-import type { Account } from '@/types';
+import {
+  checkConsistency,
+  drawdownBufferRemaining,
+  drawdownPct,
+  formatCurrency,
+  riskStatus,
+} from '@/lib/trading';
+import type { Account, Trade } from '@/types';
 
-export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
+export function RiskAlertPanel({
+  accounts,
+  trades,
+}: {
+  accounts: Account[];
+  trades: Trade[];
+}) {
   const alerts = useMemo(
     () =>
       accounts.map((a) => ({
@@ -15,9 +27,15 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
     [accounts],
   );
 
+  const consistencyChecks = useMemo(
+    () => accounts.map((a) => checkConsistency(a, trades)),
+    [accounts, trades],
+  );
+
   const stopCount = alerts.filter((a) => a.status === 'red').length;
   const cautionCount = alerts.filter((a) => a.status === 'yellow').length;
-  const allClear = stopCount === 0 && cautionCount === 0;
+  const consistencyBreachCount = consistencyChecks.filter((c) => c.breached).length;
+  const allClear = stopCount === 0 && cautionCount === 0 && consistencyBreachCount === 0;
 
   return (
     <Panel
@@ -34,8 +52,17 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
                 : 'bg-warn-500/15 text-warn-400 border-warn-500/30'
           }`}
         >
-          <StatusDot status={stopCount > 0 ? 'red' : cautionCount > 0 ? 'yellow' : 'green'} pulse />
-          {allClear ? 'ALL CLEAR' : `${stopCount + cautionCount} ACTIVE`}
+          <StatusDot
+            status={
+              stopCount > 0 || consistencyBreachCount > 0
+                ? 'red'
+                : cautionCount > 0
+                  ? 'yellow'
+                  : 'green'
+            }
+            pulse
+          />
+          {allClear ? 'ALL CLEAR' : `${stopCount + cautionCount + consistencyBreachCount} ACTIVE`}
         </div>
       }
     >
@@ -138,6 +165,44 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
             );
           })}
         </div>
+
+        {/* Consistency rule breaches */}
+        {consistencyBreachCount > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ShieldAlert className="h-3.5 w-3.5 text-bear-400" />
+              Consistency Rule Breaches
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {consistencyChecks
+                .filter((c) => c.breached)
+                .map((c) => (
+                  <div
+                    key={c.accountName}
+                    className="relative overflow-hidden rounded-lg border border-bear-500/40 bg-bear-500/10 p-3.5 animate-slideIn"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-bear-400" />
+                        <span className="text-sm font-semibold text-slate-100">
+                          {c.accountName}
+                        </span>
+                      </div>
+                      <span className="stat-value text-sm font-bold text-bear-400">
+                        {c.maxDayPercent.toFixed(1)}%
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-bear-300">
+                      BREACH. {c.maxDayDate ?? 'One day'} accounted for{' '}
+                      {c.maxDayPercent.toFixed(1)}% of total profit (
+                      {formatCurrency(c.maxDayProfit)} of {formatCurrency(c.totalProfit)}
+                      ), exceeding the {c.limit}% consistency limit.
+                    </p>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
       </div>
     </Panel>
   );
