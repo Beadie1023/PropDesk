@@ -7,7 +7,7 @@ const SEED_FLAG_KEY = 'propdesk:seeded';
 // Bump this whenever the Account/Trade shape changes. Anyone with older
 // cached localStorage data (e.g. from before the drawdown-model rewrite)
 // gets reseeded automatically instead of crashing on missing fields.
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
 
 const SEED_ACCOUNTS: Account[] = [
   {
@@ -31,38 +31,7 @@ const SEED_ACCOUNTS: Account[] = [
   },
 ];
 
-const SEED_TRADES: Trade[] = [
-  {
-    id: 'seed-1',
-    trade_date: '2026-08-01',
-    pair: 'EUR/USD',
-    direction: 'long',
-    rr_used: '1:3',
-    entry_price: 1.085,
-    sl: 1.084,
-    tp1: 1.087,
-    tp2: 1.088,
-    result: 'win',
-    dollar_amount: 120,
-    notes: 'London breakout, clean move',
-    account_name: 'Ember',
-  },
-  {
-    id: 'seed-4',
-    trade_date: '2026-08-01',
-    pair: 'XAU/USD',
-    direction: 'long',
-    rr_used: '1:3',
-    entry_price: 2385,
-    sl: 2375,
-    tp1: 2405,
-    tp2: 2415,
-    result: 'win',
-    dollar_amount: 135,
-    notes: 'Gold momentum, partial at TP1',
-    account_name: 'Ember',
-  },
-];
+const SEED_TRADES: Trade[] = [];
 
 export const genId = (): string =>
   `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
