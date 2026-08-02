@@ -14,8 +14,7 @@ type DataState = {
   deleteTrade: (id: string) => Promise<void>;
 };
 
-const sortAccounts = (a: Account[]) =>
-  [...a].sort((x, y) => x.sort_order - y.sort_order);
+const sortAccounts = (a: Account[]) => [...a];
 
 export const usePropDeskData = (): DataState => {
   const [accounts, setAccounts] = useState<Account[]>([]);
