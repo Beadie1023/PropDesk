@@ -1,145 +1,165 @@
-import type { Account, PayoutEstimate, RRKey, RiskStatus } from '@/types';
+import { useMemo } from 'react';
+import { LayoutGrid } from 'lucide-react';
+import { Panel, StatusBadge } from '@/components/ui';
+import {
+  drawdownBufferRemaining,
+  drawdownPct,
+  formatCurrency,
+  formatCurrencyShort,
+  riskStatus,
+  tradingDaysCompleted,
+} from '@/lib/trading';
+import type { Account, Trade } from '@/types';
 
-export const PIP = 0.0001;
+export function AccountDashboard({
+  accounts,
+  trades,
+}: {
+  accounts: Account[];
+  trades: Trade[];
+}) {
+  const portfolioUnrealized = useMemo(
+    () => accounts.reduce((sum, a) => sum + (a.balance - a.startingBalance), 0),
+    [accounts],
+  );
 
-export const RR_OPTIONS: RRKey[] = ['1:2', '1:3', '1:4'];
+  return (
+    <Panel
+      title="Account Dashboard"
+      subtitle="Live balance, drawdown buffer and evaluation status across funded accounts"
+      icon={<LayoutGrid className="h-5 w-5" />}
+      action={
+        <div className="flex items-center gap-2 rounded-lg bg-ink-900/70 border border-ink-600/50 px-3 py-1.5">
+          <span className="text-xs text-steel-400">Unrealized P&amp;L</span>
+          <span
+            className={`stat-value text-sm font-semibold ${
+              portfolioUnrealized >= 0 ? 'text-bull-400' : 'text-bear-400'
+            }`}
+          >
+            {portfolioUnrealized >= 0 ? '+' : '-'}
+            {formatCurrencyShort(Math.abs(portfolioUnrealized))}
+          </span>
+        </div>
+      }
+    >
+      <div className="p-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {accounts.map((account) => (
+          <AccountCard key={account.id} account={account} trades={trades} />
+        ))}
+      </div>
+    </Panel>
+  );
+}
 
-export const rrRatio = (rr: RRKey): number => {
-  const map: Record<RRKey, number> = { '1:2': 2, '1:3': 3, '1:4': 4 };
-  return map[rr];
-};
+function AccountCard({ account, trades }: { account: Account; trades: Trade[] }) {
+  const status = riskStatus(account);
+  const ddPct = drawdownPct(account);
+  const remaining = drawdownBufferRemaining(account);
+  const unrealized = account.balance - account.startingBalance;
+  const pnlPositive = unrealized >= 0;
+  const daysCompleted = tradingDaysCompleted(account.name, trades);
 
-export const roundToPip = (value: number): number => {
-  const decimals = value >= 100 ? 2 : 4;
-  const factor = Math.pow(10, decimals);
-  return Math.round(value * factor) / factor;
-};
+  const barColor =
+    status === 'red'
+      ? 'bg-bear-500'
+      : status === 'yellow'
+        ? 'bg-warn-500'
+        : 'bg-bull-500';
 
-export const formatPrice = (value: number): string => {
-  return value.toFixed(value >= 100 ? 2 : 4);
-};
+  const cardBorder =
+    status === 'red'
+      ? 'border-bear-500/40 shadow-glow-bear'
+      : status === 'yellow'
+        ? 'border-warn-500/40 shadow-glow-warn'
+        : 'border-ink-700/60';
 
-export const formatCurrency = (value: number): string => {
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
+  return (
+    <div
+      className={`relative overflow-hidden rounded-xl border ${cardBorder} bg-ink-800/50 p-4 transition hover:bg-ink-750/50`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-100">{account.name}</h3>
+          <p className="text-[11px] text-steel-500 mt-0.5">
+            {account.firm} · {account.type}
+          </p>
+        </div>
+        <StatusBadge status={status} />
+      </div>
 
-export const formatCurrencyShort = (value: number): string => {
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
-  return `${sign}$${abs.toFixed(0)}`;
-};
+      {/* Balance */}
+      <div className="mb-4">
+        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1">
+          Current Balance
+        </p>
+        <div className="flex items-baseline gap-2">
+          <span className="stat-value text-2xl font-bold text-slate-50">
+            {formatCurrency(account.balance)}
+          </span>
+          <span className="text-xs text-steel-500">
+            / {formatCurrencyShort(account.startingBalance)} start
+          </span>
+        </div>
+      </div>
 
-export const formatPercent = (value: number): string => {
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${value.toFixed(1)}%`;
-};
+      {/* Unrealized P&L */}
+      <div className="mb-4">
+        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1">
+          Unrealized P&amp;L
+        </p>
+        <div
+          className={`stat-value text-lg font-semibold ${
+            pnlPositive ? 'text-bull-400' : 'text-bear-400'
+          }`}
+        >
+          {pnlPositive ? '+' : '-'}{formatCurrency(Math.abs(unrealized))}
+        </div>
+      </div>
 
-export type CalcResult = {
-  sl: number;
-  tp1: number;
-  tp2: number;
-  tp3: number;
-  pipDistanceSL: number;
-  pipDistanceTP1: number;
-  pipDistanceTP2: number;
-  pipDistanceTP3: number;
-  perAccount: {
-    account: Account;
-    winAtTP1: number;
-    winAtTP2: number;
-    winAtTP3: number;
-    lossAtSL: number;
-    rrMultiple: number;
-  }[];
-  totalWin: number;
-  totalLoss: number;
-};
+      {/* Drawdown meter */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] text-steel-400 uppercase tracking-wider">
+            Drawdown Buffer Used
+          </span>
+          <span className="text-[11px] stat-value text-steel-300">
+            {ddPct.toFixed(0)}% / 100%
+          </span>
+        </div>
+        <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-full ${barColor} transition-all duration-500`}
+            style={{ width: `${ddPct}%` }}
+          />
+          {/* 75% threshold marker */}
+          <div className="absolute inset-y-0 left-[75%] w-px bg-ink-950/80" />
+        </div>
+        <div className="flex items-center justify-between mt-2 text-[11px]">
+          <span className="text-steel-500">
+            Floor {formatCurrencyShort(account.floorBalance)} · Max DD {account.maxDrawdownPercent}%
+          </span>
+          <span
+            className={`stat-value ${
+              remaining <= 0 ? 'text-bear-400' : 'text-steel-400'
+            }`}
+          >
+            {remaining <= 0 ? 'Breached' : `${formatCurrencyShort(remaining)} left`}
+          </span>
+        </div>
+      </div>
 
-export const calculateTrade = (
-  entryPrice: number,
-  rr: RRKey,
-  accounts: Account[],
-): CalcResult => {
-  const ratio = rrRatio(rr);
-  const sl = roundToPip(entryPrice - 10 * PIP);
-  const tp1 = roundToPip(entryPrice + 20 * PIP);
-  const tp2 = roundToPip(entryPrice + 30 * PIP);
-  const tp3 = roundToPip(entryPrice + 40 * PIP);
-
-  const pipDistanceSL = 10;
-  const pipDistanceTP1 = 20;
-  const pipDistanceTP2 = 30;
-  const pipDistanceTP3 = 40;
-
-  const perAccount = accounts.map((account) => {
-    const winAtTP1 = pipDistanceTP1 * account.pipValue;
-    const winAtTP2 = pipDistanceTP2 * account.pipValue;
-    const winAtTP3 = pipDistanceTP3 * account.pipValue;
-    const lossAtSL = pipDistanceSL * account.pipValue;
-    const rrMultiple = ratio;
-    return { account, winAtTP1, winAtTP2, winAtTP3, lossAtSL, rrMultiple };
-  });
-
-  const totalWin = perAccount.reduce((sum, a) => sum + a.winAtTP3, 0);
-  const totalLoss = perAccount.reduce((sum, a) => sum + a.lossAtSL, 0);
-
-  return {
-    sl,
-    tp1,
-    tp2,
-    tp3,
-    pipDistanceSL,
-    pipDistanceTP1,
-    pipDistanceTP2,
-    pipDistanceTP3,
-    perAccount,
-    totalWin,
-    totalLoss,
-  };
-};
-
-/**
- * Drawdown risk is measured against the account's floor balance (the stop-out
- * line), relative to the buffer between the high-water mark and that floor.
- */
-export const riskStatus = (account: Account): RiskStatus => {
-  if (account.balance <= account.floorBalance) return 'red';
-  const totalBuffer = account.highWaterMark - account.floorBalance;
-  if (totalBuffer <= 0) return 'green';
-  const used = account.highWaterMark - account.balance;
-  const usedRatio = used / totalBuffer;
-  if (usedRatio >= 0.75) return 'yellow';
-  return 'green';
-};
-
-export const drawdownPct = (account: Account): number => {
-  const totalBuffer = account.highWaterMark - account.floorBalance;
-  if (totalBuffer <= 0) return 0;
-  const used = Math.max(account.highWaterMark - account.balance, 0);
-  return Math.min(used / totalBuffer, 1) * 100;
-};
-
-export const drawdownBufferRemaining = (account: Account): number =>
-  Math.max(account.balance - account.floorBalance, 0);
-
-/**
- * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
- * This estimates what a payout request right now would be worth.
- */
-export const estimatePayout = (account: Account): PayoutEstimate => {
-  const grossProfit = Math.max(account.balance - account.startingBalance, 0);
-  const splitAmount = grossProfit * (account.profitSplit / 100);
-  return {
-    accountId: account.id,
-    accountName: account.name,
-    grossProfit,
-    splitAmount,
-    eligible: grossProfit > 0,
-  };
-};
-
-export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
-  entries.reduce((sum, e) => sum + e.splitAmount, 0);
+      {/* Evaluation status */}
+      <div className="mt-3 pt-3 border-t border-ink-700/40 flex items-center justify-between text-[11px]">
+        <span className="text-steel-500">{account.phase} · {account.profitSplit}% split</span>
+        <span
+          className={`stat-value ${
+            daysCompleted >= account.minTradingDays ? 'text-bull-400' : 'text-steel-400'
+          }`}
+        >
+          {daysCompleted}/{account.minTradingDays}d · {account.consistencyLimit}% consistency
+        </span>
+      </div>
+    </div>
+  );
+}
