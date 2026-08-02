@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { AlertOctagon, AlertTriangle, ShieldCheck, Square } from 'lucide-react';
 import { Panel, StatusDot } from '@/components/ui';
-import { drawdownPct, formatCurrency, riskStatus } from '@/lib/trading';
+import { drawdownBufferRemaining, drawdownPct, formatCurrency, riskStatus } from '@/lib/trading';
 import type { Account } from '@/types';
 
 export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
@@ -9,8 +9,8 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
     () =>
       accounts.map((a) => ({
         account: a,
-        status: riskStatus(a.daily_pnl, a.daily_loss_limit),
-        ddPct: drawdownPct(a.daily_pnl, a.daily_loss_limit),
+        status: riskStatus(a),
+        ddPct: drawdownPct(a),
       })),
     [accounts],
   );
@@ -22,7 +22,7 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
   return (
     <Panel
       title="Risk Alert Panel"
-      subtitle="Automated warnings at 75% caution and 100% stop thresholds"
+      subtitle="Automated warnings at 75% and 100% of the drawdown buffer"
       icon={<AlertOctagon className="h-5 w-5" />}
       action={
         <div
@@ -66,8 +66,8 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
               </h3>
               <p className="text-xs text-steel-400">
                 {stopCount > 0
-                  ? `STOP TRADING — ${stopCount} account${stopCount > 1 ? 's' : ''} hit daily loss limit`
-                  : 'No accounts at stop threshold — trading permitted'}
+                  ? `STOP TRADING — ${stopCount} account${stopCount > 1 ? 's' : ''} hit the drawdown floor`
+                  : 'No accounts at the drawdown floor — trading permitted'}
               </p>
             </div>
           </div>
@@ -84,12 +84,12 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
         </div>
 
         {/* Per-account banners */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {alerts.map(({ account, status, ddPct }) => {
             const isRed = status === 'red';
             const isYellow = status === 'yellow';
             const isGreen = status === 'green';
-            const lossUsed = Math.min(Math.abs(account.daily_pnl), account.daily_loss_limit);
+            const remaining = drawdownBufferRemaining(account);
 
             return (
               <div
@@ -128,17 +128,11 @@ export function RiskAlertPanel({ accounts }: { accounts: Account[] }) {
                   }`}
                 >
                   {isRed &&
-                    `STOP. Daily loss limit reached. ${formatCurrency(lossUsed)} of ${formatCurrency(
-                      account.daily_loss_limit,
-                    )} used. Halt all trading on this account immediately.`}
+                    `STOP. Drawdown floor of ${formatCurrency(account.floorBalance)} reached. Halt all trading on this account immediately.`}
                   {isYellow &&
-                    `CAUTION. ${ddPct.toFixed(0)}% of daily limit consumed (${formatCurrency(
-                      lossUsed,
-                    )} / ${formatCurrency(account.daily_loss_limit)}). Reduce risk and protect the remaining limit.`}
+                    `CAUTION. ${ddPct.toFixed(0)}% of the drawdown buffer consumed. Only ${formatCurrency(remaining)} remains above the floor of ${formatCurrency(account.floorBalance)}.`}
                   {isGreen &&
-                    `Within normal risk. ${formatCurrency(
-                      account.daily_loss_limit - lossUsed,
-                    )} of daily buffer remaining.`}
+                    `Within normal risk. ${formatCurrency(remaining)} of buffer remaining above the floor.`}
                 </p>
               </div>
             );
