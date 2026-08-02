@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Account, Trade } from '@/types';
 import { genId, loadAccounts, loadTrades, saveAccounts, saveTrades } from '@/lib/storage';
+import { recalculateBalance } from '@/lib/trading';
 
 type DataState = {
   accounts: Account[];
@@ -12,6 +13,7 @@ type DataState = {
   updateAccountBalance: (id: string, balance: number) => Promise<void>;
   addTrade: (trade: Omit<Trade, 'id'>) => Promise<void>;
   deleteTrade: (id: string) => Promise<void>;
+  importTrades: (trades: Omit<Trade, 'id'>[], accountId: string) => Promise<void>;
 };
 
 const sortAccounts = (a: Account[]) => [...a];
@@ -88,6 +90,39 @@ export const usePropDeskData = (): DataState => {
     [trades],
   );
 
+  /**
+   * Bulk-imports trades (e.g. from a CSV parse), persists them to
+   * localStorage, then recalculates the target account's balance from the
+   * full trade log. Trading days completed and the consistency check are
+   * derived live from `trades` elsewhere, so they update automatically once
+   * this state changes — no separate recompute step needed for those.
+   */
+  const importTrades = useCallback(
+    async (newTrades: Omit<Trade, 'id'>[], accountId: string) => {
+      try {
+        const withIds: Trade[] = newTrades.map((t) => ({ ...t, id: genId() }));
+        const updatedTrades = [...withIds, ...trades];
+        setTrades(updatedTrades);
+        saveTrades(updatedTrades);
+
+        const targetAccount = accounts.find((a) => a.id === accountId);
+        if (targetAccount) {
+          const newBalance = recalculateBalance(targetAccount, updatedTrades);
+          const updatedAccounts = accounts.map((a) =>
+            a.id === accountId
+              ? { ...a, balance: newBalance, highWaterMark: Math.max(a.highWaterMark, newBalance) }
+              : a,
+          );
+          setAccounts(sortAccounts(updatedAccounts));
+          saveAccounts(updatedAccounts);
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to import trades');
+      }
+    },
+    [trades, accounts],
+  );
+
   return {
     accounts,
     trades,
@@ -98,5 +133,6 @@ export const usePropDeskData = (): DataState => {
     updateAccountBalance,
     addTrade,
     deleteTrade,
+    importTrades,
   };
 };
