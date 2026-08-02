@@ -1,4 +1,4 @@
-import type { Account, PayoutEntry, RRKey, RiskStatus } from '@/types';
+import type { Account, PayoutEstimate, RRKey, RiskStatus } from '@/types';
 
 export const PIP = 0.0001;
 
@@ -75,10 +75,10 @@ export const calculateTrade = (
   const pipDistanceTP3 = 40;
 
   const perAccount = accounts.map((account) => {
-    const winAtTP1 = pipDistanceTP1 * account.pip_value;
-    const winAtTP2 = pipDistanceTP2 * account.pip_value;
-    const winAtTP3 = pipDistanceTP3 * account.pip_value;
-    const lossAtSL = pipDistanceSL * account.pip_value;
+    const winAtTP1 = pipDistanceTP1 * account.pipValue;
+    const winAtTP2 = pipDistanceTP2 * account.pipValue;
+    const winAtTP3 = pipDistanceTP3 * account.pipValue;
+    const lossAtSL = pipDistanceSL * account.pipValue;
     const rrMultiple = ratio;
     return { account, winAtTP1, winAtTP2, winAtTP3, lossAtSL, rrMultiple };
   });
@@ -101,117 +101,45 @@ export const calculateTrade = (
   };
 };
 
-export const riskStatus = (dailyPnl: number, dailyLossLimit: number): RiskStatus => {
-  const loss = Math.min(dailyPnl, 0);
-  const usedRatio = Math.abs(loss) / dailyLossLimit;
-  if (usedRatio >= 1.0) return 'red';
+/**
+ * Drawdown risk is measured against the account's floor balance (the stop-out
+ * line), relative to the buffer between the high-water mark and that floor.
+ */
+export const riskStatus = (account: Account): RiskStatus => {
+  if (account.balance <= account.floorBalance) return 'red';
+  const totalBuffer = account.highWaterMark - account.floorBalance;
+  if (totalBuffer <= 0) return 'green';
+  const used = account.highWaterMark - account.balance;
+  const usedRatio = used / totalBuffer;
   if (usedRatio >= 0.75) return 'yellow';
   return 'green';
 };
 
-export const drawdownPct = (dailyPnl: number, dailyLossLimit: number): number => {
-  const loss = Math.min(dailyPnl, 0);
-  return Math.min(Math.abs(loss) / dailyLossLimit, 1) * 100;
+export const drawdownPct = (account: Account): number => {
+  const totalBuffer = account.highWaterMark - account.floorBalance;
+  if (totalBuffer <= 0) return 0;
+  const used = Math.max(account.highWaterMark - account.balance, 0);
+  return Math.min(used / totalBuffer, 1) * 100;
 };
 
-export const addDays = (date: Date, days: number): Date => {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
-};
+export const drawdownBufferRemaining = (account: Account): number =>
+  Math.max(account.balance - account.floorBalance, 0);
 
-export const isWeekend = (date: Date): boolean => {
-  const day = date.getDay();
-  return day === 0 || day === 6;
-};
-
-export const isTradingDay = (date: Date): boolean => !isWeekend(date);
-
-const cycleDays = (cycle: Account['payout_cycle']): number => {
-  switch (cycle) {
-    case 'every_5_days':
-      return 5;
-    case 'weekly':
-      return 7;
-    case 'every_14_days':
-      return 14;
-    default:
-      return 5;
-  }
-};
-
-export const generatePayouts = (
-  accounts: Account[],
-  startDate: Date,
-  dayCount = 90,
-): PayoutEntry[] => {
-  const entries: PayoutEntry[] = [];
-
-  for (const account of accounts) {
-    const funded = new Date(account.funded_date);
-    const startCursor = funded < startDate ? new Date(startDate) : new Date(funded);
-    const cycle = cycleDays(account.payout_cycle);
-    const cycleLabel = account.payout_cycle;
-
-    if (cycleLabel === 'weekly') {
-      const firstPayout = addDays(funded, 7);
-      let cursor = firstPayout;
-      const end = addDays(startDate, dayCount);
-      while (cursor <= end) {
-        entries.push(buildPayout(account, new Date(cursor)));
-        cursor = addDays(cursor, 7);
-      }
-    } else {
-      // every N trading days after funded
-      const firstPayout = nthTradingDayAfter(funded, cycle);
-      let cursor = firstPayout;
-      const end = addDays(startDate, dayCount);
-      while (cursor <= end) {
-        entries.push(buildPayout(account, new Date(cursor)));
-        cursor = nthTradingDayAfter(cursor, cycle);
-      }
-    }
-  }
-
-  return entries.sort((a, b) => a.date.getTime() - b.date.getTime());
-};
-
-const nthTradingDayAfter = (from: Date, n: number): Date => {
-  let cursor = new Date(from);
-  let found = 0;
-  while (found < n) {
-    cursor = addDays(cursor, 1);
-    if (isTradingDay(cursor)) found++;
-  }
-  return cursor;
-};
-
-const buildPayout = (account: Account, date: Date): PayoutEntry => {
-  const gross = account.projected_profit;
-  const splitAmount = gross * account.payout_split;
-  const flatFee = account.payout_flat_fee;
-  const cryptoFee = splitAmount * account.payout_crypto_fee_pct;
-  const net = splitAmount - flatFee - cryptoFee;
+/**
+ * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
+ * This estimates what a payout request right now would be worth.
+ */
+export const estimatePayout = (account: Account): PayoutEstimate => {
+  const grossProfit = Math.max(account.balance - account.startingBalance, 0);
+  const splitAmount = grossProfit * (account.profitSplit / 100);
   return {
-    date,
+    accountId: account.id,
     accountName: account.name,
-    gross,
-    net,
-    fee: flatFee + cryptoFee,
+    grossProfit,
     splitAmount,
+    eligible: grossProfit > 0,
   };
 };
 
-export const cumulativeTotal = (entries: PayoutEntry[]): number =>
-  entries.reduce((sum, e) => sum + e.net, 0);
-
-export const monthName = (date: Date): string =>
-  date.toLocaleString('en-US', { month: 'short' });
-
-export const dayNumber = (date: Date): number => date.getDate();
-
-export const formatDate = (date: Date): string =>
-  date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-export const formatDateShort = (date: Date): string =>
-  date.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
+  entries.reduce((sum, e) => sum + e.splitAmount, 0);
