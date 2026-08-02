@@ -28,7 +28,7 @@ const NAV: { key: View; label: string; icon: typeof Activity }[] = [
 ];
 
 function App() {
-  const { accounts, trades, loading, error, addTrade, deleteTrade } =
+  const { accounts, trades, loading, error, addTrade, deleteTrade, importTrades } =
     usePropDeskData();
   const [view, setView] = useState<View>('overview');
 
@@ -153,6 +153,7 @@ function App() {
               accounts={accounts}
               onAddTrade={addTrade}
               onDeleteTrade={deleteTrade}
+              onImportTrades={importTrades}
             />
           </div>
         )}
@@ -173,6 +174,7 @@ function App() {
             accounts={accounts}
             onAddTrade={addTrade}
             onDeleteTrade={deleteTrade}
+            onImportTrades={importTrades}
           />
         )}
       </main>
