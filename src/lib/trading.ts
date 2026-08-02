@@ -145,6 +145,18 @@ export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
   entries.reduce((sum, e) => sum + e.splitAmount, 0);
 
 /**
+ * Recomputes an account's balance from scratch as startingBalance plus the
+ * sum of every logged trade's dollar_amount for that account. Used after
+ * bulk operations like CSV import so balance stays consistent with the log.
+ */
+export const recalculateBalance = (account: Account, trades: Trade[]): number => {
+  const total = trades
+    .filter((t) => t.account_name === account.name)
+    .reduce((sum, t) => sum + t.dollar_amount, 0);
+  return account.startingBalance + total;
+};
+
+/**
  * Counts distinct calendar dates on which the account logged at least one
  * trade. Reads straight from the trades in storage — not a stored counter.
  */
