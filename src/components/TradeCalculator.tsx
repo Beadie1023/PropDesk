@@ -25,7 +25,7 @@ export function TradeCalculator({ accounts }: { accounts: Account[] }) {
   return (
     <Panel
       title="Trade Calculator"
-      subtitle="Simultaneous P&L across all four funded accounts"
+      subtitle="Simultaneous P&L across all funded accounts"
       icon={<Calculator className="h-5 w-5" />}
       action={
         <div className="flex items-center gap-1.5 rounded-lg bg-ink-900/70 border border-ink-600/50 p-1">
@@ -141,7 +141,7 @@ export function TradeCalculator({ accounts }: { accounts: Account[] }) {
                     {account.lots.toFixed(2)}
                   </td>
                   <td className="px-3 py-3 text-right stat-value text-slate-300">
-                    ${account.pip_value.toFixed(2)}
+                    ${account.pipValue.toFixed(2)}
                   </td>
                   <td className="px-3 py-3 text-right stat-value text-bear-400">
                     -{formatCurrency(lossAtSL).replace('-', '')}
