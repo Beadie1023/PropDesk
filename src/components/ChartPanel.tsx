@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CandlestickSeries,
   ColorType,
@@ -7,22 +7,13 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { LineChart } from 'lucide-react';
+import { Loader2, LineChart } from 'lucide-react';
 import { Panel } from '@/components/ui';
 
-export const PAIRS = ['EURUSD', 'GBPUSD', 'USDJPY', 'XAUUSD', 'GBPJPY'] as const;
-export type Pair = (typeof PAIRS)[number];
-
-// Base price used to seed generated candles per pair. There is no live
-// market-data feed connected to this app, so the chart renders deterministic
-// sample candles instead of real quotes — see generateCandles below.
-const BASE_PRICE: Record<Pair, number> = {
-  EURUSD: 1.085,
-  GBPUSD: 1.272,
-  USDJPY: 149.8,
-  XAUUSD: 2385,
-  GBPJPY: 190.5,
-};
+// This chart is hardcoded to a single pair — no selector.
+const PAIR = 'GBPAUD';
+const PAIR_LABEL = 'GBP/AUD';
+const TWELVEDATA_SYMBOL = 'GBP/AUD';
 
 type Candle = {
   time: UTCTimestamp;
@@ -32,8 +23,44 @@ type Candle = {
   close: number;
 };
 
-// Deterministic PRNG seeded per pair so the same pair always renders the
-// same candles instead of reshuffling on every re-render.
+// ---------------------------------------------------------------------------
+// Heikin Ashi conversion
+// HA Close = (O + H + L + C) / 4
+// HA Open  = (previous HA Open + previous HA Close) / 2 — seeded from the
+//            first real candle's own open/close for the very first bar.
+// HA High  = max(H, HA Open, HA Close)
+// HA Low   = min(L, HA Open, HA Close)
+// ---------------------------------------------------------------------------
+
+function toHeikinAshi(candles: Candle[]): Candle[] {
+  if (candles.length === 0) return [];
+
+  const result: Candle[] = [];
+  let prevHaOpen = candles[0].open;
+  let prevHaClose = candles[0].close;
+
+  candles.forEach((c, i) => {
+    const haClose = (c.open + c.high + c.low + c.close) / 4;
+    const haOpen = i === 0 ? (c.open + c.close) / 2 : (prevHaOpen + prevHaClose) / 2;
+    const haHigh = Math.max(c.high, haOpen, haClose);
+    const haLow = Math.min(c.low, haOpen, haClose);
+
+    result.push({ time: c.time, open: haOpen, high: haHigh, low: haLow, close: haClose });
+
+    prevHaOpen = haOpen;
+    prevHaClose = haClose;
+  });
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Sample-data fallback (used when no API key is set, or the Twelve Data
+// request fails). Deterministic so it doesn't reshuffle on re-render.
+// ---------------------------------------------------------------------------
+
+const BASE_PRICE = 1.95; // approx GBP/AUD
+
 function mulberry32(seed: number) {
   let s = seed;
   return function random() {
@@ -53,18 +80,17 @@ function seedFromString(str: string): number {
   return h;
 }
 
-function generateCandles(pair: Pair, count = 180): Candle[] {
-  const random = mulberry32(seedFromString(pair));
-  const basePrice = BASE_PRICE[pair];
-  const volatility = basePrice * 0.0025;
-  const dayInSeconds = 86400;
-  const startTime = Math.floor(Date.now() / 1000) - count * dayInSeconds;
+function generateSampleCandles(count = 100): Candle[] {
+  const random = mulberry32(seedFromString(PAIR));
+  const volatility = BASE_PRICE * 0.0025;
+  const hourInSeconds = 3600;
+  const startTime = Math.floor(Date.now() / 1000) - count * hourInSeconds;
 
-  let price = basePrice;
+  let price = BASE_PRICE;
   const candles: Candle[] = [];
 
   for (let i = 0; i < count; i++) {
-    const time = (startTime + i * dayInSeconds) as UTCTimestamp;
+    const time = (startTime + i * hourInSeconds) as UTCTimestamp;
     const open = price;
     const drift = (random() - 0.5) * volatility;
     const close = Math.max(open + drift, open * 0.5);
@@ -77,16 +103,77 @@ function generateCandles(pair: Pair, count = 180): Candle[] {
   return candles;
 }
 
-export function ChartPanel({
-  pair,
-  onPairChange,
-}: {
-  pair: Pair;
-  onPairChange: (pair: Pair) => void;
-}) {
+// ---------------------------------------------------------------------------
+// Twelve Data — real OHLC fetch
+// ---------------------------------------------------------------------------
+
+const TWELVEDATA_URL = 'https://api.twelvedata.com/time_series';
+
+type TwelveDataValue = {
+  datetime: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+};
+
+type TwelveDataResponse =
+  | { status: 'ok'; values: TwelveDataValue[] }
+  | { status: 'error'; code?: number; message?: string };
+
+async function fetchOHLC(): Promise<Candle[]> {
+  const apiKey = import.meta.env.VITE_TWELVEDATA_KEY;
+  if (!apiKey) {
+    throw new Error('VITE_TWELVEDATA_KEY is not set');
+  }
+
+  const params = new URLSearchParams({
+    symbol: TWELVEDATA_SYMBOL,
+    interval: '1h',
+    outputsize: '100',
+    timezone: 'UTC',
+    apikey: apiKey,
+  });
+
+  const response = await fetch(`${TWELVEDATA_URL}?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`Twelve Data request failed with status ${response.status}`);
+  }
+
+  const data = (await response.json()) as TwelveDataResponse;
+  if (data.status !== 'ok' || !Array.isArray(data.values) || data.values.length === 0) {
+    throw new Error(data.status === 'error' ? data.message ?? 'Twelve Data error' : 'No data returned');
+  }
+
+  // Twelve Data returns most-recent-first; ascending order is needed both
+  // for the chart and for the Heikin Ashi running calculation.
+  const candles = data.values
+    .map((v): Candle => ({
+      time: Math.floor(new Date(`${v.datetime.replace(' ', 'T')}Z`).getTime() / 1000) as UTCTimestamp,
+      open: parseFloat(v.open),
+      high: parseFloat(v.high),
+      low: parseFloat(v.low),
+      close: parseFloat(v.close),
+    }))
+    .filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close))
+    .sort((a, b) => a.time - b.time);
+
+  if (candles.length === 0) {
+    throw new Error('Twelve Data returned no parseable candles');
+  }
+
+  return candles;
+}
+
+// ---------------------------------------------------------------------------
+
+export function ChartPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [usingSampleData, setUsingSampleData] = useState(false);
 
   // Create the chart once and let it resize with its container.
   useEffect(() => {
@@ -104,6 +191,7 @@ export function ChartPanel({
       },
       timeScale: {
         borderColor: 'rgba(148, 163, 184, 0.15)',
+        timeVisible: true,
       },
       rightPriceScale: {
         borderColor: 'rgba(148, 163, 184, 0.15)',
@@ -133,34 +221,54 @@ export function ChartPanel({
     };
   }, []);
 
-  // Repopulate candles whenever the selected pair changes.
+  // Fetch real OHLC data on mount, convert to Heikin Ashi, fall back to
+  // generated sample candles (also converted) if Twelve Data is unavailable.
   useEffect(() => {
-    if (!seriesRef.current) return;
-    seriesRef.current.setData(generateCandles(pair));
-    chartRef.current?.timeScale().fitContent();
-  }, [pair]);
+    let cancelled = false;
+    setLoading(true);
+
+    fetchOHLC()
+      .then((candles) => {
+        if (cancelled) return;
+        seriesRef.current?.setData(toHeikinAshi(candles));
+        chartRef.current?.timeScale().fitContent();
+        setUsingSampleData(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        seriesRef.current?.setData(toHeikinAshi(generateSampleCandles()));
+        chartRef.current?.timeScale().fitContent();
+        setUsingSampleData(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <Panel
-      title="Price Chart"
-      subtitle="Candlestick view — sample data, not a live market feed"
-      icon={<LineChart className="h-5 w-5" />}
-      action={
-        <select
-          value={pair}
-          onChange={(e) => onPairChange(e.target.value as Pair)}
-          className="input-field w-32"
-        >
-          {PAIRS.map((p) => (
-            <option key={p} value={p}>
-              {p.slice(0, 3)}/{p.slice(3)}
-            </option>
-          ))}
-        </select>
+      title={`${PAIR_LABEL} Price Chart`}
+      subtitle={
+        usingSampleData
+          ? 'Heikin Ashi candles — sample data (Twelve Data unavailable)'
+          : 'Heikin Ashi candles — live 1H data from Twelve Data'
       }
+      icon={<LineChart className="h-5 w-5" />}
     >
       <div className="p-5">
-        <div ref={containerRef} className="w-full h-[400px]" />
+        <div className="relative w-full h-[400px]">
+          <div ref={containerRef} className="w-full h-full" />
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center gap-2 bg-ink-900/60 backdrop-blur-sm rounded-lg text-sm text-steel-300">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading {PAIR_LABEL}…
+            </div>
+          )}
+        </div>
       </div>
     </Panel>
   );
