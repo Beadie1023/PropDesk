@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { LayoutGrid } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { LayoutGrid, Radio } from 'lucide-react';
 import { Panel, StatusBadge } from '@/components/ui';
 import {
   drawdownBufferRemaining,
@@ -9,6 +9,7 @@ import {
   riskStatus,
   tradingDaysCompleted,
 } from '@/lib/trading';
+import { connectAccount, type ConnectionStatus } from '@/lib/metaapi';
 import type { Account, Trade } from '@/types';
 
 export function AccountDashboard({
@@ -23,22 +24,51 @@ export function AccountDashboard({
     [accounts],
   );
 
+  const [liveStatus, setLiveStatus] = useState<ConnectionStatus>('disconnected');
+
+  // Auto-connect to the live MT5 account on load. Any failure (backend
+  // unreachable, MetaApi credentials not set, account not deployed, etc.)
+  // is caught inside connectAccount itself, logged to console, and
+  // resolves to 'disconnected' rather than throwing — this must never
+  // crash the dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    connectAccount().then((status) => {
+      if (!cancelled) setLiveStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <Panel
       title="Account Dashboard"
       subtitle="Live balance, drawdown buffer and evaluation status across funded accounts"
       icon={<LayoutGrid className="h-5 w-5" />}
       action={
-        <div className="flex items-center gap-2 rounded-lg bg-ink-900/70 border border-ink-600/50 px-3 py-1.5">
-          <span className="text-xs text-steel-400">Unrealized P&amp;L</span>
-          <span
-            className={`stat-value text-sm font-semibold ${
-              portfolioUnrealized >= 0 ? 'text-bull-400' : 'text-bear-400'
+        <div className="flex items-center gap-3">
+          <div
+            className={`chip border ${
+              liveStatus === 'connected'
+                ? 'bg-bull-500/15 text-bull-400 border-bull-500/30'
+                : 'bg-bear-500/15 text-bear-400 border-bear-500/30'
             }`}
           >
-            {portfolioUnrealized >= 0 ? '+' : '-'}
-            {formatCurrencyShort(Math.abs(portfolioUnrealized))}
-          </span>
+            <Radio className="h-3 w-3" />
+            {liveStatus === 'connected' ? 'Live Connected' : 'Disconnected'}
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-ink-900/70 border border-ink-600/50 px-3 py-1.5">
+            <span className="text-xs text-steel-400">Unrealized P&amp;L</span>
+            <span
+              className={`stat-value text-sm font-semibold ${
+                portfolioUnrealized >= 0 ? 'text-bull-400' : 'text-bear-400'
+              }`}
+            >
+              {portfolioUnrealized >= 0 ? '+' : '-'}
+              {formatCurrencyShort(Math.abs(portfolioUnrealized))}
+            </span>
+          </div>
         </div>
       }
     >
