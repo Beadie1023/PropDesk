@@ -44,11 +44,11 @@ export function AccountDashboard({
    action={
     <div className="flex items-center gap-3">
      <div
-      className={chip border ${
+      className={`chip border ${
        liveStatus === 'connected'
         ? 'bg-bull-500/15 text-bull-400 border-bull-500/30'
         : 'bg-bear-500/15 text-bear-400 border-bear-500/30'
-      }}
+      }`}
      >
       <Radio className="h-3 w-3" />
       {liveStatus === 'connected' ? 'Live Connected' : 'Disconnected'}
@@ -56,9 +56,9 @@ export function AccountDashboard({
      <div className="flex items-center gap-2 rounded-lg bg-ink-900/70 border border-ink-600/50 px-3 py-1.5">
       <span className="text-xs text-steel-400">Unrealized P&amp;L</span>
       <span
-       className={stat-value text-sm font-semibold ${
+       className={`stat-value text-sm font-semibold ${
         portfolioUnrealized >= 0 ? 'text-bull-400' : 'text-bear-400'
-       }}
+       }`}
       >
        {portfolioUnrealized >= 0 ? '+' : '-'}
        {formatCurrencyShort(Math.abs(portfolioUnrealized))}
@@ -100,7 +100,7 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade }) {
 
  return (
   <div
-   className={relative overflow-hidden rounded-xl border ${cardBorder} bg-ink-800/50 p-4 transition hover:bg-ink-750/50}
+   className={`relative overflow-hidden rounded-xl border ${cardBorder} bg-ink-800/50 p-4 transition hover:bg-ink-750/50`}
   >
    <div className="flex items-start justify-between mb-4">
     <div>
@@ -131,9 +131,9 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade }) {
      Unrealized P&amp;L
     </p>
     <div
-     className={stat-value text-lg font-semibold ${
+     className={`stat-value text-lg font-semibold ${
       pnlPositive ? 'text-bull-400' : 'text-bear-400'
-     }}
+     }`}
     >
      {pnlPositive ? '+' : '-'}{formatCurrency(Math.abs(unrealized))}
     </div>
@@ -150,8 +150,8 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade }) {
     </div>
     <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
      <div
-      className={absolute inset-y-0 left-0 rounded-full ${barColor} transition-all duration-500}
-      style={{ width: ${ddPct}% }}
+      className={`absolute inset-y-0 left-0 rounded-full ${barColor} transition-all duration-500`}
+      style={{ width: `${ddPct}%` }}
      />
      <div className="absolute inset-y-0 left-[75%] w-px bg-ink-950/80" />
     </div>
@@ -160,11 +160,11 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade }) {
       Floor {formatCurrencyShort(account.floorBalance)} · Max DD {account.maxDrawdownPercent}%
      </span>
      <span
-      className={stat-value ${
+      className={`stat-value ${
        remaining <= 0 ? 'text-bear-400' : 'text-steel-400'
-      }}
+      }`}
      >
-      {remaining <= 0 ? 'Breached' : ${formatCurrencyShort(remaining)} left}
+      {remaining <= 0 ? 'Breached' : `${formatCurrencyShort(remaining)} left`}
      </span>
     </div>
    </div>
@@ -172,9 +172,9 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade }) {
    <div className="mt-3 pt-3 border-t border-ink-700/40 flex items-center justify-between text-[11px]">
     <span className="text-steel-500">{account.phase} · {account.profitSplit}% split</span>
     <span
-     className={stat-value ${
+     className={`stat-value ${
       daysCompleted >= account.minTradingDays ? 'text-bull-400' : 'text-steel-400'
-     }}
+     }`}
     >
      {daysCompleted}/{account.minTradingDays}d · {account.consistencyLimit}% consistency
     </span>
