@@ -9,7 +9,7 @@ import {
 } from '@/lib/trading';
 import type { Account, RRKey } from '@/types';
 
-export function TradeCalculator({ accounts }: { accounts: Account[] }) {
+export function TradeCalculator({ accounts, pair }: { accounts: Account[]; pair?: string }) {
   const [entryInput, setEntryInput] = useState('1.0850');
   const [rr, setRr] = useState<RRKey>('1:3');
 
@@ -25,7 +25,9 @@ export function TradeCalculator({ accounts }: { accounts: Account[] }) {
   return (
     <Panel
       title="Trade Calculator"
-      subtitle="Simultaneous P&L across all funded accounts"
+      subtitle={`Simultaneous P&L across all funded accounts${
+        pair ? ` — ${pair.slice(0, 3)}/${pair.slice(3)}` : ''
+      }`}
       icon={<Calculator className="h-5 w-5" />}
       action={
         <div className="flex items-center gap-1.5 rounded-lg bg-ink-900/70 border border-ink-600/50 p-1">
