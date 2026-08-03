@@ -33,11 +33,9 @@ export function AccountDashboard({
   // crash the dashboard.
   useEffect(() => {
     let cancelled = false;
-
-    connectAccount().then((status: 'connected' | 'disconnected' | 'connecting') => {
+    connectAccount().then((status) => {
       if (!cancelled) setLiveStatus(status);
     });
-
     return () => {
       cancelled = true;
     };
