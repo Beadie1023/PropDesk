@@ -33,9 +33,12 @@ export function AccountDashboard({
   // crash the dashboard.
   useEffect(() => {
     let cancelled = false;
-    connectAccount().then((status) => {
+
+    // Explicitly typed the status parameter to prevent implicit 'any' compile blocks
+    connectAccount().then((status: ConnectionStatus) => {
       if (!cancelled) setLiveStatus(status);
     });
+
     return () => {
       cancelled = true;
     };
