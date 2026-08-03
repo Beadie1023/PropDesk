@@ -9,7 +9,7 @@ import {
   riskStatus,
   tradingDaysCompleted,
 } from '@/lib/trading';
-import { connectAccount, type ConnectionStatus } from '../lib/metaapi';
+import { connectAccount, type ConnectionStatus } from '@/lib/metaapi';
 import type { Account, Trade } from '@/types';
 
 export function AccountDashboard({
