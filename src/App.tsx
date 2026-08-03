@@ -15,7 +15,7 @@ import { PayoutTracker } from '@/components/PayoutTracker';
 import { AccountDashboard } from '@/components/AccountDashboard';
 import { RiskAlertPanel } from '@/components/RiskAlertPanel';
 import { SessionJournal } from '@/components/SessionJournal';
-import { ChartPanel, type Pair } from '@/components/ChartPanel';
+import { ChartPanel } from '@/components/ChartPanel';
 
 type View = 'overview' | 'calculator' | 'payouts' | 'accounts' | 'risk' | 'journal';
 
@@ -32,7 +32,6 @@ function App() {
   const { accounts, trades, loading, error, addTrade, deleteTrade, importTrades } =
     usePropDeskData();
   const [view, setView] = useState<View>('overview');
-  const [pair, setPair] = useState<Pair>('EURUSD');
 
   const portfolioBalance = useMemo(
     () => accounts.reduce((s, a) => s + a.balance, 0),
@@ -146,10 +145,10 @@ function App() {
           <div className="space-y-6">
             <AccountDashboard accounts={accounts} trades={trades} />
             <div className="grid grid-cols-2 gap-6">
-              <TradeCalculator accounts={accounts} pair={pair} />
+              <TradeCalculator accounts={accounts} />
               <RiskAlertPanel accounts={accounts} trades={trades} />
             </div>
-            <ChartPanel pair={pair} onPairChange={setPair} />
+            <ChartPanel />
             <PayoutTracker accounts={accounts} />
             <SessionJournal
               trades={trades}
@@ -162,7 +161,7 @@ function App() {
         )}
 
         {view === 'calculator' && (
-          <TradeCalculator accounts={accounts} pair={pair} />
+          <TradeCalculator accounts={accounts} />
         )}
 
         {view === 'payouts' && <PayoutTracker accounts={accounts} />}
