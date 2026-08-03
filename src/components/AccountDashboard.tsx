@@ -9,7 +9,7 @@ import {
   riskStatus,
   tradingDaysCompleted,
 } from '@/lib/trading';
-import { connectAccount, type ConnectionStatus } from '@/lib/metaapi';
+import { connectAccount, type ConnectionStatus } from '../lib/metaapi';
 import type { Account, Trade } from '@/types';
 
 export function AccountDashboard({
@@ -33,7 +33,8 @@ export function AccountDashboard({
   // crash the dashboard.
   useEffect(() => {
     let cancelled = false;
-    connectAccount().then((status) => {
+    .then((status: 'connected' | 'disconnected' | 'connecting') => {
+
       if (!cancelled) setLiveStatus(status);
     });
     return () => {
