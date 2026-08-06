@@ -1,5 +1,3 @@
-// src/components/ConsistencyTracker.tsx
-
 import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle, TrendingUp } from 'lucide-react';
 
@@ -11,7 +9,7 @@ interface DailyPnL {
 interface ConsistencyTrackerProps {
  dailyPnL: DailyPnL;
  totalGrossProfit: number;
- consistencyCap?: number; // default 20%
+ consistencyCap?: number;
 }
 
 export function ConsistencyTracker({
@@ -47,42 +45,42 @@ export function ConsistencyTracker({
  }, [dailyPnL, totalGrossProfit, consistencyCap]);
 
  const scoreColor = violated
- ? 'text-bear-400'
+ ? 'text-red-400'
  : consistencyScore > 15
- ? 'text-warn-400'
- : 'text-bull-400';
+ ? 'text-yellow-400'
+ : 'text-green-400';
 
  const borderColor = violated
- ? 'border-bear-500/60'
+ ? 'border-red-500/60'
  : consistencyScore > 15
- ? 'border-warn-500/60'
- : 'border-bull-500/30';
+ ? 'border-yellow-500/60'
+ : 'border-green-500/30';
 
  return (
- <div className={`rounded-xl border p-4 bg-ink-800/50 transition-all duration-300 ${borderColor}`}>
+ <div className={`rounded-xl border p-4 bg-gray-800/50 transition-all duration-300 ${borderColor}`}>
 
  {/* Header */}
  <div className="flex items-center justify-between mb-4">
  <div className="flex items-center gap-2">
- <TrendingUp className="h-4 w-4 text-steel-400" />
+ <TrendingUp className="h-4 w-4 text-gray-400" />
  <span className="text-sm font-semibold text-slate-100">
  Consistency Tracker
  </span>
  </div>
- <span className="text-[11px] text-steel-500">
+ <span className="text-[11px] text-gray-500">
  Upcomers · 20% Cap
  </span>
  </div>
 
  {/* Violation Banner */}
  {violated && (
- <div className="flex items-center gap-2 bg-bear-500/10 border border-bear-500/30 rounded-lg p-3 mb-4">
- <AlertTriangle className="h-4 w-4 text-bear-400 shrink-0" />
+ <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+ <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
  <div>
- <p className="text-sm font-semibold text-bear-300">
+ <p className="text-sm font-semibold text-red-300">
  Consistency Rule Violated
  </p>
- <p className="text-[11px] text-bear-400/70 mt-0.5">
+ <p className="text-[11px] text-red-400/70 mt-0.5">
  Best day exceeds 20% of total profit - payout may be rejected
  </p>
  </div>
@@ -91,55 +89,59 @@ export function ConsistencyTracker({
 
  {/* Score Display */}
  <div className="grid grid-cols-3 gap-3 mb-4">
- <div className="bg-ink-900/60 rounded-lg p-3 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide mb-1">
+ <div className="bg-gray-900/60 rounded-lg p-3 text-center">
+ <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">
  Best Day
  </p>
  <p className={`text-lg font-bold ${scoreColor}`}>
  ${bestDay.toFixed(2)}
  </p>
- <p className="text-[10px] text-steel-600 mt-0.5">{bestDayDate}</p>
+ <p className="text-[10px] text-gray-600 mt-0.5">{bestDayDate}</p>
  </div>
 
- <div className="bg-ink-900/60 rounded-lg p-3 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide mb-1">
+ <div className="bg-gray-900/60 rounded-lg p-3 text-center">
+ <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">
  Score
  </p>
  <p className={`text-lg font-bold ${scoreColor}`}>
  {consistencyScore.toFixed(1)}%
  </p>
- <p className="text-[10px] text-steel-600 mt-0.5">of total profit</p>
+ <p className="text-[10px] text-gray-600 mt-0.5">of total profit</p>
  </div>
 
- <div className="bg-ink-900/60 rounded-lg p-3 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide mb-1">
+ <div className="bg-gray-900/60 rounded-lg p-3 text-center">
+ <p className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">
  Allowed Max
  </p>
- <p className="text-lg font-bold text-steel-300">
+ <p className="text-lg font-bold text-gray-300">
  ${allowedMax.toFixed(2)}
  </p>
- <p className="text-[10px] text-steel-600 mt-0.5">per day</p>
+ <p className="text-[10px] text-gray-600 mt-0.5">per day</p>
  </div>
  </div>
 
  {/* Progress Bar */}
  <div>
- <div className="flex justify-between text-[10px] text-steel-500 mb-1">
+ <div className="flex justify-between text-[10px] text-gray-500 mb-1">
  <span>Consistency Usage</span>
  <span>{consistencyScore.toFixed(1)}% / 20% cap</span>
  </div>
- <div className="h-2 bg-ink-900 rounded-full overflow-hidden">
+ <div className="h-2 bg-gray-900 rounded-full overflow-hidden">
  <div
  className={`h-full rounded-full transition-all duration-500 ${
- violated ? 'bg-bear-500' : consistencyScore > 15 ? 'bg-warn-500' : 'bg-bull-500'
+ violated
+ ? 'bg-red-500'
+ : consistencyScore > 15
+ ? 'bg-yellow-500'
+ : 'bg-green-500'
  }`}
  style={{ width: `${Math.min(consistencyScore, 100)}%` }}
  />
  </div>
  {!violated && (
  <div className="flex items-center gap-1 mt-2">
- <CheckCircle className="h-3 w-3 text-bull-400" />
- <span className="text-[10px] text-bull-400">
+ <CheckCircle className="h-3 w-3 text-green-400" />
+ <span className="text-[10px] text-green-400">
  Within Upcomers consistency rules
  </span>
  </div>
