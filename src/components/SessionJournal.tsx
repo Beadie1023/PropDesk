@@ -1,712 +1,274 @@
-import { useMemo, useRef, useState } from 'react';
-import {
-  AlertTriangle,
-  BookOpen,
-  CheckCircle2,
-  Plus,
-  Target,
-  Trash2,
-  TrendingDown,
-  TrendingUp,
-  Upload,
-  X,
-} from 'lucide-react';
-import { Panel } from '@/components/ui';
-import { RR_OPTIONS, formatCurrency, formatPrice } from '@/lib/trading';
-import { parseMT5Csv, type ParsedImportResult } from '@/lib/csvImport';
-import type { Account, Trade } from '@/types';
+import { useState } from 'react';
+import { BookOpen, Plus, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 
-export function SessionJournal({
-  trades,
-  accounts,
-  onAddTrade,
-  onDeleteTrade,
-  onImportTrades,
-}: {
-  trades: Trade[];
-  accounts: Account[];
-  onAddTrade: (trade: Omit<Trade, 'id'>) => Promise<void>;
-  onDeleteTrade: (id: string) => Promise<void>;
-  onImportTrades: (trades: Omit<Trade, 'id'>[], accountId: string) => Promise<void>;
-}) {
-  const [showForm, setShowForm] = useState(false);
-  const [importResult, setImportResult] = useState<ParsedImportResult | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const stats = useMemo(() => {
-    const wins = trades.filter((t) => t.result === 'win');
-    const losses = trades.filter((t) => t.result === 'loss');
-    const totalPnl = trades.reduce((s, t) => s + t.dollar_amount, 0);
-    const winRate =
-      trades.length > 0 ? (wins.length / trades.length) * 100 : 0;
-    const grossWin = wins.reduce((s, t) => s + t.dollar_amount, 0);
-    const grossLoss = Math.abs(losses.reduce((s, t) => s + t.dollar_amount, 0));
-    const avgWin = wins.length > 0 ? grossWin / wins.length : 0;
-    const avgLoss = losses.length > 0 ? grossLoss / losses.length : 0;
-    const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
-    return {
-      total: trades.length,
-      wins: wins.length,
-      losses: losses.length,
-      winRate,
-      totalPnl,
-      grossWin,
-      grossLoss,
-      avgWin,
-      avgLoss,
-      profitFactor,
-    };
-  }, [trades]);
-
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === 'string' ? reader.result : '';
-      setImportResult(parseMT5Csv(text));
-    };
-    reader.readAsText(file);
-  };
-
-  return (
-    <Panel
-      title="Session Journal"
-      subtitle="Trade log with running win rate and P&L analytics"
-      icon={<BookOpen className="h-5 w-5" />}
-      action={
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            className="hidden"
-            onChange={handleFileSelected}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="btn-ghost"
-          >
-            <Upload className="h-4 w-4" />
-            Import MT5 CSV
-          </button>
-          <button
-            onClick={() => setShowForm(true)}
-            className="btn-primary"
-          >
-            <Plus className="h-4 w-4" />
-            Log Trade
-          </button>
-        </div>
-      }
-    >
-      {/* Summary stats */}
-      <div className="grid grid-cols-6 gap-px bg-ink-700/40 border-b border-ink-700/50">
-        <StatCell
-          label="Total P&L"
-          value={`${stats.totalPnl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(stats.totalPnl))}`}
-          tone={stats.totalPnl >= 0 ? 'bull' : 'bear'}
-          big
-        />
-        <StatCell
-          label="Win Rate"
-          value={`${stats.winRate.toFixed(1)}%`}
-          tone={stats.winRate >= 50 ? 'bull' : 'bear'}
-          big
-        />
-        <StatCell label="Trades" value={String(stats.total)} />
-        <StatCell label="Wins" value={String(stats.wins)} tone="bull" />
-        <StatCell label="Losses" value={String(stats.losses)} tone="bear" />
-        <StatCell
-          label="Profit Factor"
-          value={
-            stats.profitFactor === Infinity
-              ? '∞'
-              : stats.profitFactor.toFixed(2)
-          }
-          tone={stats.profitFactor >= 1 ? 'bull' : 'bear'}
-        />
-      </div>
-
-      {/* Trade table */}
-      <div className="overflow-x-auto scrollbar-thin">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-ink-900/60 text-steel-400 text-xs uppercase tracking-wider sticky top-0">
-              <th className="text-left font-medium px-4 py-3">Date</th>
-              <th className="text-left font-medium px-3 py-3">Pair</th>
-              <th className="text-left font-medium px-3 py-3">Dir</th>
-              <th className="text-center font-medium px-3 py-3">R:R</th>
-              <th className="text-right font-medium px-3 py-3">Entry</th>
-              <th className="text-right font-medium px-3 py-3">Close</th>
-              <th className="text-right font-medium px-3 py-3">Lots</th>
-              <th className="text-right font-medium px-3 py-3">SL</th>
-              <th className="text-right font-medium px-3 py-3">TP1</th>
-              <th className="text-right font-medium px-3 py-3">TP2</th>
-              <th className="text-center font-medium px-3 py-3">Result</th>
-              <th className="text-right font-medium px-3 py-3">P&amp;L</th>
-              <th className="text-left font-medium px-3 py-3">Account</th>
-              <th className="text-left font-medium px-3 py-3">Notes</th>
-              <th className="px-3 py-3"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-700/40">
-            {trades.length === 0 && (
-              <tr>
-                <td colSpan={15} className="text-center py-12 text-steel-400 text-sm">
-                  No trades logged yet. Click "Log Trade" or "Import MT5 CSV" to add your first entry.
-                </td>
-              </tr>
-            )}
-            {trades.map((trade) => (
-              <tr
-                key={trade.id}
-                className="hover:bg-ink-800/40 transition group"
-              >
-                <td className="px-4 py-3 stat-value text-slate-300 whitespace-nowrap">
-                  {new Date(trade.trade_date).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </td>
-                <td className="px-3 py-3 font-semibold text-slate-100">
-                  {trade.pair}
-                </td>
-                <td className="px-3 py-3">
-                  <span
-                    className={`chip ${
-                      trade.direction === 'long'
-                        ? 'bg-bull-500/15 text-bull-400'
-                        : 'bg-bear-500/15 text-bear-400'
-                    }`}
-                  >
-                    {trade.direction === 'long' ? (
-                      <TrendingUp className="h-3 w-3" />
-                    ) : (
-                      <TrendingDown className="h-3 w-3" />
-                    )}
-                    {trade.direction.toUpperCase()}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-center stat-value text-slate-300">
-                  {trade.source === 'mt5_import' ? '—' : trade.rr_used}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-slate-300">
-                  {formatPrice(trade.entry_price)}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-slate-300">
-                  {trade.close_price !== undefined ? formatPrice(trade.close_price) : '—'}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-slate-300">
-                  {trade.lots !== undefined ? trade.lots.toFixed(2) : '—'}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-bear-400/80">
-                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.sl)}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-bull-400/80">
-                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.tp1)}
-                </td>
-                <td className="px-3 py-3 text-right stat-value text-bull-400/80">
-                  {trade.source === 'mt5_import' ? '—' : formatPrice(trade.tp2)}
-                </td>
-                <td className="px-3 py-3 text-center">
-                  <span
-                    className={`chip ${
-                      trade.result === 'win'
-                        ? 'bg-bull-500/15 text-bull-400'
-                        : 'bg-bear-500/15 text-bear-400'
-                    }`}
-                  >
-                    {trade.result.toUpperCase()}
-                  </span>
-                </td>
-                <td
-                  className={`px-3 py-3 text-right stat-value font-semibold ${
-                    trade.dollar_amount >= 0 ? 'text-bull-400' : 'text-bear-400'
-                  }`}
-                >
-                  {trade.dollar_amount >= 0 ? '+' : '-'}{formatCurrency(Math.abs(trade.dollar_amount))}
-                </td>
-                <td className="px-3 py-3 text-xs text-steel-400 whitespace-nowrap">
-                  {trade.account_name || '—'}
-                </td>
-                <td className="px-3 py-3 text-xs text-steel-400 max-w-[220px] truncate">
-                  {trade.notes || '—'}
-                </td>
-                <td className="px-3 py-3 text-right">
-                  <button
-                    onClick={() => onDeleteTrade(trade.id)}
-                    className="opacity-0 group-hover:opacity-100 text-steel-500 hover:text-bear-400 transition"
-                    title="Delete trade"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {showForm && (
-        <AddTradeModal
-          accounts={accounts}
-          onClose={() => setShowForm(false)}
-          onSubmit={async (trade) => {
-            await onAddTrade(trade);
-            setShowForm(false);
-          }}
-        />
-      )}
-
-      {importResult && (
-        <ImportCsvModal
-          result={importResult}
-          accounts={accounts}
-          onClose={() => setImportResult(null)}
-          onConfirm={async (accountId, accountName) => {
-            const tradesWithAccount = importResult.trades.map((t) => ({
-              ...t,
-              account_name: accountName,
-            }));
-            await onImportTrades(tradesWithAccount, accountId);
-            setImportResult(null);
-          }}
-        />
-      )}
-    </Panel>
-  );
+interface TradeEntry {
+ id: string;
+ date: string;
+ openTime: string;
+ closeTime: string;
+ direction: 'BUY' | 'SELL';
+ entryPrice: number;
+ exitPrice: number;
+ stopLoss: number;
+ takeProfit: number;
+ lotSize: number;
+ grossPnL: number;
+ commission: number;
+ netPnL: number;
+ rrAchieved: number;
+ rrTarget: number;
+ conditions: {
+ currencyStrength: boolean;
+ zoneConfirmed: boolean;
+ lorentzian: boolean;
+ momentum: boolean;
+ };
+ notes?: string;
+ validDay: boolean;
 }
 
-function ImportCsvModal({
-  result,
-  accounts,
-  onClose,
-  onConfirm,
-}: {
-  result: ParsedImportResult;
-  accounts: Account[];
-  onClose: () => void;
-  onConfirm: (accountId: string, accountName: string) => Promise<void>;
-}) {
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
-  const [importing, setImporting] = useState(false);
+// Seed with your first live trade
+const INITIAL_TRADES: TradeEntry[] = [
+ {
+ id: '13071341',
+ date: 'August 6, 2026',
+ openTime: '13:08:22',
+ closeTime: '14:49:48',
+ direction: 'BUY',
+ entryPrice: 1.91197,
+ exitPrice: 1.91355,
+ stopLoss: 1.91055,
+ takeProfit: 1.91355,
+ lotSize: 0.01,
+ grossPnL: 1.11,
+ commission: -0.05,
+ netPnL: 1.06,
+ rrAchieved: 1.11,
+ rrTarget: 3,
+ conditions: {
+ currencyStrength: true,
+ zoneConfirmed: true,
+ lorentzian: true,
+ momentum: true,
+ },
+ notes: 'First live trade on Ember account. TP hit exactly.',
+ validDay: false, // Upcomers showing Not Counted - confirm with support
+ },
+];
 
-  const netProfit = result.trades.reduce((s, t) => s + t.dollar_amount, 0);
-  const selectedAccount = accounts.find((a) => a.id === accountId);
-
-  const handleConfirm = async () => {
-    if (!selectedAccount || result.trades.length === 0) return;
-    setImporting(true);
-    await onConfirm(selectedAccount.id, selectedAccount.name);
-    setImporting(false);
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 backdrop-blur-sm p-6"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700/60 text-accent-400">
-              <Upload className="h-5 w-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-slate-100">Import MT5 CSV</h3>
-              <p className="text-xs text-steel-400">Review before adding to the journal</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-steel-400 hover:text-slate-100 hover:bg-ink-700/60 transition"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-4">
-          {result.trades.length > 0 ? (
-            <div className="flex items-start gap-2.5 rounded-lg border border-bull-500/30 bg-bull-500/10 p-3.5">
-              <CheckCircle2 className="h-4 w-4 text-bull-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-bull-300 leading-relaxed">
-                Parsed <span className="stat-value font-semibold">{result.trades.length}</span> trade
-                {result.trades.length === 1 ? '' : 's'} · net{' '}
-                <span className="stat-value font-semibold">{formatCurrency(netProfit)}</span>
-              </p>
-            </div>
-          ) : (
-            <div className="flex items-start gap-2.5 rounded-lg border border-bear-500/30 bg-bear-500/10 p-3.5">
-              <AlertTriangle className="h-4 w-4 text-bear-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-bear-300 leading-relaxed">
-                No importable trades found in this file.
-              </p>
-            </div>
-          )}
-
-          {result.skippedRows > 0 && (
-            <div className="flex items-start gap-2.5 rounded-lg border border-warn-500/30 bg-warn-500/10 p-3.5">
-              <AlertTriangle className="h-4 w-4 text-warn-400 mt-0.5 shrink-0" />
-              <p className="text-xs text-warn-300 leading-relaxed">
-                Skipped {result.skippedRows} row{result.skippedRows === 1 ? '' : 's'} (headers, balance
-                operations, or rows that couldn't be parsed).
-              </p>
-            </div>
-          )}
-
-          {result.errors.length > 0 && (
-            <div className="rounded-lg border border-ink-600/40 bg-ink-900/40 p-3 max-h-32 overflow-y-auto scrollbar-thin">
-              {result.errors.map((err, i) => (
-                <p key={i} className="text-[11px] text-steel-500 leading-relaxed">
-                  {err}
-                </p>
-              ))}
-            </div>
-          )}
-
-          {result.trades.length > 0 && (
-            <Field label="Import Into Account">
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="input-field"
-              >
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50">
-          <button onClick={onClose} className="btn-ghost">
-            Cancel
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={result.trades.length === 0 || !accountId || importing}
-            className="btn-primary"
-          >
-            {importing ? 'Importing…' : `Import ${result.trades.length} Trade${result.trades.length === 1 ? '' : 's'}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+interface SessionJournalProps {
+ onTradeAdded?: (trade: TradeEntry) => void;
 }
 
-function StatCell({
-  label,
-  value,
-  tone,
-  big = false,
-}: {
-  label: string;
-  value: string;
-  tone?: 'bull' | 'bear';
-  big?: boolean;
-}) {
-  const color =
-    tone === 'bull'
-      ? 'text-bull-400'
-      : tone === 'bear'
-        ? 'text-bear-400'
-        : 'text-slate-100';
-  return (
-    <div className="bg-ink-850/60 px-4 py-3.5">
-      <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1">
-        {label}
-      </p>
-      <p
-        className={`stat-value font-semibold ${color} ${big ? 'text-xl' : 'text-base'}`}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
+export function SessionJournal({ onTradeAdded }: SessionJournalProps) {
+ const [trades, setTrades] = useState<TradeEntry[]>(INITIAL_TRADES);
+ const [showForm, setShowForm] = useState(false);
+ const [expandedId, setExpandedId] = useState<string | null>(null);
 
-const EMPTY_FORM = {
-  trade_date: new Date().toISOString().slice(0, 10),
-  pair: '',
-  direction: 'long' as 'long' | 'short',
-  rr_used: '1:3',
-  entry_price: '',
-  sl: '',
-  tp1: '',
-  tp2: '',
-  result: 'win' as 'win' | 'loss',
-  dollar_amount: '',
-  notes: '',
-  account_name: '',
-};
+ // Daily PnL summary
+ const todayTrades = trades.filter(t => t.date === 'August 6, 2026');
+ const todayGross = todayTrades.reduce((sum, t) => sum + t.grossPnL, 0);
+ const todayNet = todayTrades.reduce((sum, t) => sum + t.netPnL, 0);
+ const todayWins = todayTrades.filter(t => t.netPnL > 0).length;
+ const validDays = trades.filter(t => t.validDay).length;
 
-function AddTradeModal({
-  accounts,
-  onClose,
-  onSubmit,
-}: {
-  accounts: Account[];
-  onClose: () => void;
-  onSubmit: (trade: Omit<Trade, 'id'>) => Promise<void>;
-}) {
-  const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [submitting, setSubmitting] = useState(false);
+ // RR color
+ function rrColor(achieved: number, target: number) {
+ if (achieved >= target) return 'text-bull-400';
+ if (achieved >= target * 0.6) return 'text-warn-400';
+ return 'text-bear-400';
+ }
 
-  const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
-    setForm((f) => ({ ...f, [key]: value }));
+ return (
+ <div className="rounded-xl border border-ink-700/60 bg-ink-800/50 p-4">
 
-  const canSubmit =
-    form.pair.trim() &&
-    form.entry_price &&
-    form.sl &&
-    form.tp1 &&
-    form.tp2 &&
-    form.dollar_amount;
+ {/* Header */}
+ <div className="flex items-center justify-between mb-4">
+ <div className="flex items-center gap-2">
+ <BookOpen className="h-4 w-4 text-steel-400" />
+ <span className="text-sm font-semibold text-slate-100">
+ Session Journal
+ </span>
+ </div>
+ <button
+ onClick={() => setShowForm(!showForm)}
+ className="flex items-center gap-1 text-[11px] bg-accent-500/20 hover:bg-accent-500/30 text-accent-300 border border-accent-500/30 rounded-lg px-3 py-1.5 transition font-semibold"
+ >
+ <Plus className="h-3 w-3" />
+ Log Trade
+ </button>
+ </div>
 
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setSubmitting(true);
-    await onSubmit({
-      trade_date: form.trade_date,
-      pair: form.pair.trim().toUpperCase(),
-      direction: form.direction,
-      rr_used: form.rr_used,
-      entry_price: parseFloat(form.entry_price),
-      sl: parseFloat(form.sl),
-      tp1: parseFloat(form.tp1),
-      tp2: parseFloat(form.tp2),
-      result: form.result,
-      dollar_amount: parseFloat(form.dollar_amount),
-      notes: form.notes.trim(),
-      account_name: form.account_name,
-    });
-    setSubmitting(false);
-  };
+ {/* Today Summary Bar */}
+ <div className="grid grid-cols-4 gap-2 mb-4">
+ <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
+ <p className="text-[10px] text-steel-500 uppercase tracking-wide">Today P&L</p>
+ <p className={`text-sm font-bold mt-0.5 ${todayNet >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
+ ${todayNet.toFixed(2)}
+ </p>
+ </div>
+ <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
+ <p className="text-[10px] text-steel-500 uppercase tracking-wide">Trades</p>
+ <p className="text-sm font-bold text-slate-200 mt-0.5">{todayTrades.length}</p>
+ </div>
+ <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
+ <p className="text-[10px] text-steel-500 uppercase tracking-wide">Win Rate</p>
+ <p className="text-sm font-bold text-bull-400 mt-0.5">
+ {todayTrades.length ? Math.round((todayWins / todayTrades.length) * 100) : 0}%
+ </p>
+ </div>
+ <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
+ <p className="text-[10px] text-steel-500 uppercase tracking-wide">Valid Days</p>
+ <p className="text-sm font-bold text-steel-300 mt-0.5">{validDays}/5</p>
+ </div>
+ </div>
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 backdrop-blur-sm p-6"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-2xl rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700/60 text-accent-400">
-              <Target className="h-5 w-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-slate-100">Log a Trade</h3>
-              <p className="text-xs text-steel-400">
-                Record entry, exits, result and notes
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-steel-400 hover:text-slate-100 hover:bg-ink-700/60 transition"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+ {/* Trade List */}
+ <div className="space-y-2">
+ {trades.map((trade) => (
+ <div
+ key={trade.id}
+ className="border border-ink-700/40 rounded-lg overflow-hidden"
+ >
+ {/* Trade Row */}
+ <button
+ onClick={() => setExpandedId(expandedId === trade.id ? null : trade.id)}
+ className="w-full flex items-center justify-between p-3 hover:bg-ink-700/30 transition text-left"
+ >
+ <div className="flex items-center gap-3">
+ {trade.direction === 'BUY'
+ ? <TrendingUp className="h-4 w-4 text-bull-400" />
+ : <TrendingDown className="h-4 w-4 text-bear-400" />
+ }
+ <div>
+ <p className="text-sm font-semibold text-slate-200">
+ {trade.direction} GBP/AUD
+ </p>
+ <p className="text-[10px] text-steel-500">
+ #{trade.id} · {trade.openTime} - {trade.closeTime}
+ </p>
+ </div>
+ </div>
 
-        <div className="p-6 space-y-5">
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Date">
-              <input
-                type="date"
-                value={form.trade_date}
-                onChange={(e) => set('trade_date', e.target.value)}
-                className="input-field"
-              />
-            </Field>
-            <Field label="Pair">
-              <input
-                type="text"
-                value={form.pair}
-                onChange={(e) => set('pair', e.target.value)}
-                placeholder="EUR/USD"
-                className="input-field"
-              />
-            </Field>
-            <Field label="Account">
-              <select
-                value={form.account_name}
-                onChange={(e) => set('account_name', e.target.value)}
-                className="input-field"
-              >
-                <option value="">— Select —</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          </div>
+ <div className="flex items-center gap-4">
+ {/* RR Badge */}
+ <div className="text-right">
+ <p className={`text-sm font-bold ${rrColor(trade.rrAchieved, trade.rrTarget)}`}>
+ 1:{trade.rrAchieved.toFixed(1)}
+ </p>
+ <p className="text-[10px] text-steel-600">target 1:{trade.rrTarget}</p>
+ </div>
 
-          <div className="grid grid-cols-4 gap-4">
-            <Field label="Direction">
-              <div className="flex gap-1.5">
-                {(['long', 'short'] as const).map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => set('direction', d)}
-                    className={`flex-1 rounded-lg px-3 py-2.5 text-xs font-semibold uppercase transition ${
-                      form.direction === d
-                        ? d === 'long'
-                          ? 'bg-bull-500/20 text-bull-400 border border-bull-500/40'
-                          : 'bg-bear-500/20 text-bear-400 border border-bear-500/40'
-                        : 'bg-ink-900 text-steel-400 border border-ink-600/50 hover:text-slate-200'
-                    }`}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label="R:R Used">
-              <select
-                value={form.rr_used}
-                onChange={(e) => set('rr_used', e.target.value)}
-                className="input-field"
-              >
-                {RR_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Result">
-              <div className="flex gap-1.5">
-                {(['win', 'loss'] as const).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => set('result', r)}
-                    className={`flex-1 rounded-lg px-3 py-2.5 text-xs font-semibold uppercase transition ${
-                      form.result === r
-                        ? r === 'win'
-                          ? 'bg-bull-500/20 text-bull-400 border border-bull-500/40'
-                          : 'bg-bear-500/20 text-bear-400 border border-bear-500/40'
-                        : 'bg-ink-900 text-steel-400 border border-ink-600/50 hover:text-slate-200'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </Field>
-            <Field label="P&L ($)">
-              <input
-                type="number"
-                step="0.01"
-                value={form.dollar_amount}
-                onChange={(e) => set('dollar_amount', e.target.value)}
-                placeholder="120.00"
-                className={`input-field ${
-                  form.result === 'loss' ? 'text-bear-400' : 'text-bull-400'
-                }`}
-              />
-            </Field>
-          </div>
+ {/* Net PnL */}
+ <div className="text-right min-w-[60px]">
+ <p className={`text-sm font-bold ${trade.netPnL >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
+ {trade.netPnL >= 0 ? '+' : ''}${trade.netPnL.toFixed(2)}
+ </p>
+ <p className="text-[10px] text-steel-600">net</p>
+ </div>
+ </div>
+ </button>
 
-          <div className="grid grid-cols-4 gap-4">
-            <Field label="Entry Price">
-              <input
-                type="number"
-                step="0.0001"
-                value={form.entry_price}
-                onChange={(e) => set('entry_price', e.target.value)}
-                placeholder="1.0850"
-                className="input-field"
-              />
-            </Field>
-            <Field label="Stop Loss">
-              <input
-                type="number"
-                step="0.0001"
-                value={form.sl}
-                onChange={(e) => set('sl', e.target.value)}
-                placeholder="1.0840"
-                className="input-field text-bear-400"
-              />
-            </Field>
-            <Field label="TP1">
-              <input
-                type="number"
-                step="0.0001"
-                value={form.tp1}
-                onChange={(e) => set('tp1', e.target.value)}
-                placeholder="1.0870"
-                className="input-field text-bull-400"
-              />
-            </Field>
-            <Field label="TP2">
-              <input
-                type="number"
-                step="0.0001"
-                value={form.tp2}
-                onChange={(e) => set('tp2', e.target.value)}
-                placeholder="1.0880"
-                className="input-field text-bull-400"
-              />
-            </Field>
-          </div>
+ {/* Expanded Detail */}
+ {expandedId === trade.id && (
+ <div className="border-t border-ink-700/40 p-3 bg-ink-900/40 space-y-3">
 
-          <Field label="Notes">
-            <textarea
-              value={form.notes}
-              onChange={(e) => set('notes', e.target.value)}
-              placeholder="Setup, session, observations…"
-              rows={2}
-              className="input-field resize-none font-sans"
-            />
-          </Field>
-        </div>
+ {/* Price Details */}
+ <div className="grid grid-cols-3 gap-2 text-center">
+ <div>
+ <p className="text-[10px] text-steel-500">Entry</p>
+ <p className="text-sm font-semibold text-slate-200">{trade.entryPrice}</p>
+ </div>
+ <div>
+ <p className="text-[10px] text-steel-500">Exit</p>
+ <p className="text-sm font-semibold text-slate-200">{trade.exitPrice}</p>
+ </div>
+ <div>
+ <p className="text-[10px] text-steel-500">Lot Size</p>
+ <p className="text-sm font-semibold text-slate-200">{trade.lotSize}</p>
+ </div>
+ </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50">
-          <button onClick={onClose} className="btn-ghost">
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
-            className="btn-primary"
-          >
-            {submitting ? 'Saving…' : 'Save Trade'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+ {/* SL / TP */}
+ <div className="grid grid-cols-2 gap-2 text-center">
+ <div className="bg-bear-500/10 rounded-lg p-2">
+ <p className="text-[10px] text-bear-400">Stop Loss</p>
+ <p className="text-sm font-semibold text-bear-300">{trade.stopLoss}</p>
+ </div>
+ <div className="bg-bull-500/10 rounded-lg p-2">
+ <p className="text-[10px] text-bull-400">Take Profit</p>
+ <p className="text-sm font-semibold text-bull-300">{trade.takeProfit}</p>
+ </div>
+ </div>
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-steel-400 mb-2 uppercase tracking-wider">
-        {label}
-      </label>
-      {children}
-    </div>
-  );
+ {/* PnL Breakdown */}
+ <div className="grid grid-cols-3 gap-2 text-center">
+ <div>
+ <p className="text-[10px] text-steel-500">Gross</p>
+ <p className="text-sm font-semibold text-bull-400">+${trade.grossPnL.toFixed(2)}</p>
+ </div>
+ <div>
+ <p className="text-[10px] text-steel-500">Commission</p>
+ <p className="text-sm font-semibold text-bear-400">${trade.commission.toFixed(2)}</p>
+ </div>
+ <div>
+ <p className="text-[10px] text-steel-500">Net</p>
+ <p className="text-sm font-semibold text-bull-400">+${trade.netPnL.toFixed(2)}</p>
+ </div>
+ </div>
+
+ {/* Conditions */}
+ <div>
+ <p className="text-[10px] text-steel-500 uppercase tracking-wide mb-1.5">
+ Conditions Present
+ </p>
+ <div className="grid grid-cols-2 gap-1.5">
+ {[
+ { key: 'currencyStrength', label: 'Currency Strength' },
+ { key: 'zoneConfirmed', label: 'Zone Confirmed' },
+ { key: 'lorentzian', label: 'Lorentzian Arrow' },
+ { key: 'momentum', label: 'Momentum Strong' },
+ ].map(({ key, label }) => (
+ <div
+ key={key}
+ className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium ${
+ trade.conditions[key as keyof typeof trade.conditions]
+ ? 'bg-bull-500/10 text-bull-400'
+ : 'bg-ink-700/40 text-steel-600'
+ }`}
+ >
+ <span>{trade.conditions[key as keyof typeof trade.conditions] ? '✅' : '⬜'}</span>
+ {label}
+ </div>
+ ))}
+ </div>
+ </div>
+
+ {/* Valid Day Flag */}
+ <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold ${
+ trade.validDay
+ ? 'bg-bull-500/10 text-bull-400 border border-bull-500/20'
+ : 'bg-warn-500/10 text-warn-400 border border-warn-500/20'
+ }`}>
+ <Clock className="h-3 w-3" />
+ {trade.validDay
+ ? 'Valid Trading Day - Counts toward payout'
+ : 'Pending - Confirm valid day status with Upcomers'
+ }
+ </div>
+
+ {/* Notes */}
+ {trade.notes && (
+ <div className="bg-ink-700/30 rounded-lg p-2">
+ <p className="text-[10px] text-steel-500 mb-0.5">Notes</p>
+ <p className="text-[11px] text-slate-300">{trade.notes}</p>
+ </div>
+ )}
+ </div>
+ )}
+ </div>
+ ))}
+ </div>
+ </div>
+ );
 }
