@@ -1,274 +1,277 @@
-import { useState } from 'react';
-import { BookOpen, Plus, TrendingUp, TrendingDown, Clock } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { LayoutGrid, Radio } from 'lucide-react';
+import { Panel, StatusBadge } from '@/components/ui';
+import {
+  checkConsistency,
+  drawdownBufferRemaining,
+  drawdownPct,
+  formatCurrency,
+  formatCurrencyShort,
+  riskStatus,
+  tradingDaysCompleted,
+  type ConsistencyCheck,
+} from '@/lib/trading';
+import { connectAccount, type ConnectionStatus } from '@/lib/metaapi';
+import type { Account, Trade } from '@/types';
 
-interface TradeEntry {
- id: string;
- date: string;
- openTime: string;
- closeTime: string;
- direction: 'BUY' | 'SELL';
- entryPrice: number;
- exitPrice: number;
- stopLoss: number;
- takeProfit: number;
- lotSize: number;
- grossPnL: number;
- commission: number;
- netPnL: number;
- rrAchieved: number;
- rrTarget: number;
- conditions: {
- currencyStrength: boolean;
- zoneConfirmed: boolean;
- lorentzian: boolean;
- momentum: boolean;
- };
- notes?: string;
- validDay: boolean;
+export function AccountDashboard({
+  accounts,
+  trades,
+}: {
+  accounts: Account[];
+  trades: Trade[];
+}) {
+  const portfolioUnrealized = useMemo(
+    () => accounts.reduce((sum, a) => sum + (a.balance - a.startingBalance), 0),
+    [accounts],
+  );
+
+  const [liveStatus, setLiveStatus] = useState<ConnectionStatus>('disconnected');
+
+  // Auto-connect to the live MT5 account on load. Any failure (backend
+  // unreachable, MetaApi credentials not set, account not deployed, etc.)
+  // is caught inside connectAccount itself, logged to console, and
+  // resolves to 'disconnected' rather than throwing — this must never
+  // crash the dashboard.
+  useEffect(() => {
+    let cancelled = false;
+    connectAccount().then((status) => {
+      if (!cancelled) setLiveStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <Panel
+      title="Account Dashboard"
+      subtitle="Live balance, drawdown buffer and evaluation status across funded accounts"
+      icon={<LayoutGrid className="h-5 w-5" />}
+      action={
+        <div className="flex items-center gap-3">
+          <div
+            className={`chip border ${
+              liveStatus === 'connected'
+                ? 'bg-bull-500/15 text-bull-400 border-bull-500/30'
+                : 'bg-bear-500/15 text-bear-400 border-bear-500/30'
+            }`}
+          >
+            <Radio className="h-3 w-3" />
+            {liveStatus === 'connected' ? 'Live Connected' : 'Disconnected'}
+          </div>
+          <div className="flex items-center gap-2 rounded-lg bg-ink-900/70 border border-ink-600/50 px-3 py-1.5">
+            <span className="text-xs text-steel-400">Unrealized P&amp;L</span>
+            <span
+              className={`stat-value text-sm font-semibold ${
+                portfolioUnrealized >= 0 ? 'text-bull-400' : 'text-bear-400'
+              }`}
+            >
+              {portfolioUnrealized >= 0 ? '+' : '-'}
+              {formatCurrencyShort(Math.abs(portfolioUnrealized))}
+            </span>
+          </div>
+        </div>
+      }
+    >
+      <div className="p-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {accounts.map((account) => (
+          <AccountCard key={account.id} account={account} trades={trades} />
+        ))}
+      </div>
+    </Panel>
+  );
 }
 
-// Seed with your first live trade
-const INITIAL_TRADES: TradeEntry[] = [
- {
- id: '13071341',
- date: 'August 6, 2026',
- openTime: '13:08:22',
- closeTime: '14:49:48',
- direction: 'BUY',
- entryPrice: 1.91197,
- exitPrice: 1.91355,
- stopLoss: 1.91055,
- takeProfit: 1.91355,
- lotSize: 0.01,
- grossPnL: 1.11,
- commission: -0.05,
- netPnL: 1.06,
- rrAchieved: 1.11,
- rrTarget: 3,
- conditions: {
- currencyStrength: true,
- zoneConfirmed: true,
- lorentzian: true,
- momentum: true,
- },
- notes: 'First live trade on Ember account. TP hit exactly.',
- validDay: false, // Upcomers showing Not Counted - confirm with support
- },
-];
+type ConsistencyStatus = 'safe' | 'warning' | 'breached' | 'early';
 
-interface SessionJournalProps {
- onTradeAdded?: (trade: TradeEntry) => void;
+/**
+ * Maps the canonical ConsistencyCheck (from trading.ts — the same check
+ * that drives the Risk Alert Panel's breach warning) onto a graduated
+ * display state for this card's progress bar. No consistency math lives
+ * here; this only decides which color/label a given result gets.
+ */
+function consistencyDisplayStatus(check: ConsistencyCheck, dayCount: number): ConsistencyStatus {
+  if (check.totalProfit <= 0) return 'early';
+  if (check.breached) return 'breached';
+  const warningThreshold = check.limit - 5;
+  if (check.maxDayPercent >= warningThreshold) return 'warning';
+  if (dayCount < 2) return 'early';
+  return 'safe';
 }
 
-export function SessionJournal({ onTradeAdded }: SessionJournalProps) {
- const [trades, setTrades] = useState<TradeEntry[]>(INITIAL_TRADES);
- const [showForm, setShowForm] = useState(false);
- const [expandedId, setExpandedId] = useState<string | null>(null);
+function AccountCard({ account, trades }: { account: Account; trades: Trade[] }) {
+  const status = riskStatus(account);
+  const ddPct = drawdownPct(account);
+  const remaining = drawdownBufferRemaining(account);
+  const unrealized = account.balance - account.startingBalance;
+  const pnlPositive = unrealized >= 0;
+  const daysCompleted = tradingDaysCompleted(account.name, trades);
 
- // Daily PnL summary
- const todayTrades = trades.filter(t => t.date === 'August 6, 2026');
- const todayGross = todayTrades.reduce((sum, t) => sum + t.grossPnL, 0);
- const todayNet = todayTrades.reduce((sum, t) => sum + t.netPnL, 0);
- const todayWins = todayTrades.filter(t => t.netPnL > 0).length;
- const validDays = trades.filter(t => t.validDay).length;
+  const consistencyCheck = checkConsistency(account, trades);
+  const consistencyStatus = consistencyDisplayStatus(consistencyCheck, daysCompleted);
+  const cap = consistencyCheck.limit;
 
- // RR color
- function rrColor(achieved: number, target: number) {
- if (achieved >= target) return 'text-bull-400';
- if (achieved >= target * 0.6) return 'text-warn-400';
- return 'text-bear-400';
- }
+  const consistencyBarColor =
+    consistencyStatus === 'breached'
+      ? 'bg-bear-500'
+      : consistencyStatus === 'warning'
+        ? 'bg-warn-500'
+        : consistencyStatus === 'early'
+          ? 'bg-steel-600'
+          : 'bg-bull-500';
 
- return (
- <div className="rounded-xl border border-ink-700/60 bg-ink-800/50 p-4">
+  const consistencyLabel =
+    consistencyStatus === 'breached'
+      ? 'Breached'
+      : consistencyStatus === 'warning'
+        ? 'Warning'
+        : consistencyStatus === 'early'
+          ? 'Building'
+          : 'Safe';
 
- {/* Header */}
- <div className="flex items-center justify-between mb-4">
- <div className="flex items-center gap-2">
- <BookOpen className="h-4 w-4 text-steel-400" />
- <span className="text-sm font-semibold text-slate-100">
- Session Journal
- </span>
- </div>
- <button
- onClick={() => setShowForm(!showForm)}
- className="flex items-center gap-1 text-[11px] bg-accent-500/20 hover:bg-accent-500/30 text-accent-300 border border-accent-500/30 rounded-lg px-3 py-1.5 transition font-semibold"
- >
- <Plus className="h-3 w-3" />
- Log Trade
- </button>
- </div>
+  const consistencyLabelColor =
+    consistencyStatus === 'breached'
+      ? 'text-bear-400'
+      : consistencyStatus === 'warning'
+        ? 'text-warn-400'
+        : consistencyStatus === 'early'
+          ? 'text-steel-400'
+          : 'text-bull-400';
 
- {/* Today Summary Bar */}
- <div className="grid grid-cols-4 gap-2 mb-4">
- <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide">Today P&L</p>
- <p className={`text-sm font-bold mt-0.5 ${todayNet >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
- ${todayNet.toFixed(2)}
- </p>
- </div>
- <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide">Trades</p>
- <p className="text-sm font-bold text-slate-200 mt-0.5">{todayTrades.length}</p>
- </div>
- <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide">Win Rate</p>
- <p className="text-sm font-bold text-bull-400 mt-0.5">
- {todayTrades.length ? Math.round((todayWins / todayTrades.length) * 100) : 0}%
- </p>
- </div>
- <div className="bg-ink-900/60 rounded-lg p-2.5 text-center">
- <p className="text-[10px] text-steel-500 uppercase tracking-wide">Valid Days</p>
- <p className="text-sm font-bold text-steel-300 mt-0.5">{validDays}/5</p>
- </div>
- </div>
+  const barColor =
+    status === 'red'
+      ? 'bg-bear-500'
+      : status === 'yellow'
+        ? 'bg-warn-500'
+        : 'bg-bull-500';
 
- {/* Trade List */}
- <div className="space-y-2">
- {trades.map((trade) => (
- <div
- key={trade.id}
- className="border border-ink-700/40 rounded-lg overflow-hidden"
- >
- {/* Trade Row */}
- <button
- onClick={() => setExpandedId(expandedId === trade.id ? null : trade.id)}
- className="w-full flex items-center justify-between p-3 hover:bg-ink-700/30 transition text-left"
- >
- <div className="flex items-center gap-3">
- {trade.direction === 'BUY'
- ? <TrendingUp className="h-4 w-4 text-bull-400" />
- : <TrendingDown className="h-4 w-4 text-bear-400" />
- }
- <div>
- <p className="text-sm font-semibold text-slate-200">
- {trade.direction} GBP/AUD
- </p>
- <p className="text-[10px] text-steel-500">
- #{trade.id} · {trade.openTime} - {trade.closeTime}
- </p>
- </div>
- </div>
+  const cardBorder =
+    status === 'red'
+      ? 'border-bear-500/40 shadow-glow-bear'
+      : status === 'yellow'
+        ? 'border-warn-500/40 shadow-glow-warn'
+        : 'border-ink-700/60';
 
- <div className="flex items-center gap-4">
- {/* RR Badge */}
- <div className="text-right">
- <p className={`text-sm font-bold ${rrColor(trade.rrAchieved, trade.rrTarget)}`}>
- 1:{trade.rrAchieved.toFixed(1)}
- </p>
- <p className="text-[10px] text-steel-600">target 1:{trade.rrTarget}</p>
- </div>
+  return (
+    <div
+      className={`relative overflow-hidden rounded-xl border ${cardBorder} bg-ink-800/50 p-4 transition hover:bg-ink-750/50`}
+    >
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-100">{account.name}</h3>
+          <p className="text-[11px] text-steel-500 mt-0.5">
+            {account.firm} · {account.type}
+          </p>
+        </div>
+        <StatusBadge status={status} />
+      </div>
 
- {/* Net PnL */}
- <div className="text-right min-w-[60px]">
- <p className={`text-sm font-bold ${trade.netPnL >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
- {trade.netPnL >= 0 ? '+' : ''}${trade.netPnL.toFixed(2)}
- </p>
- <p className="text-[10px] text-steel-600">net</p>
- </div>
- </div>
- </button>
+      {/* Balance */}
+      <div className="mb-4">
+        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1">
+          Current Balance
+        </p>
+        <div className="flex items-baseline gap-2">
+          <span className="stat-value text-2xl font-bold text-slate-50">
+            {formatCurrency(account.balance)}
+          </span>
+          <span className="text-xs text-steel-500">
+            / {formatCurrencyShort(account.startingBalance)} start
+          </span>
+        </div>
+      </div>
 
- {/* Expanded Detail */}
- {expandedId === trade.id && (
- <div className="border-t border-ink-700/40 p-3 bg-ink-900/40 space-y-3">
+      {/* Unrealized P&L */}
+      <div className="mb-4">
+        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1">
+          Unrealized P&amp;L
+        </p>
+        <div
+          className={`stat-value text-lg font-semibold ${
+            pnlPositive ? 'text-bull-400' : 'text-bear-400'
+          }`}
+        >
+          {pnlPositive ? '+' : '-'}{formatCurrency(Math.abs(unrealized))}
+        </div>
+      </div>
 
- {/* Price Details */}
- <div className="grid grid-cols-3 gap-2 text-center">
- <div>
- <p className="text-[10px] text-steel-500">Entry</p>
- <p className="text-sm font-semibold text-slate-200">{trade.entryPrice}</p>
- </div>
- <div>
- <p className="text-[10px] text-steel-500">Exit</p>
- <p className="text-sm font-semibold text-slate-200">{trade.exitPrice}</p>
- </div>
- <div>
- <p className="text-[10px] text-steel-500">Lot Size</p>
- <p className="text-sm font-semibold text-slate-200">{trade.lotSize}</p>
- </div>
- </div>
+      {/* Drawdown meter */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] text-steel-400 uppercase tracking-wider">
+            Drawdown Buffer Used
+          </span>
+          <span className="text-[11px] stat-value text-steel-300">
+            {ddPct.toFixed(0)}% / 100%
+          </span>
+        </div>
+        <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-full ${barColor} transition-all duration-500`}
+            style={{ width: `${ddPct}%` }}
+          />
+          {/* 75% threshold marker */}
+          <div className="absolute inset-y-0 left-[75%] w-px bg-ink-950/80" />
+        </div>
+        <div className="flex items-center justify-between mt-2 text-[11px]">
+          <span className="text-steel-500">
+            Floor {formatCurrencyShort(account.floorBalance)} · Max DD {account.maxDrawdownPercent}%
+          </span>
+          <span
+            className={`stat-value ${
+              remaining <= 0 ? 'text-bear-400' : 'text-steel-400'
+            }`}
+          >
+            {remaining <= 0 ? 'Breached' : `${formatCurrencyShort(remaining)} left`}
+          </span>
+        </div>
+      </div>
 
- {/* SL / TP */}
- <div className="grid grid-cols-2 gap-2 text-center">
- <div className="bg-bear-500/10 rounded-lg p-2">
- <p className="text-[10px] text-bear-400">Stop Loss</p>
- <p className="text-sm font-semibold text-bear-300">{trade.stopLoss}</p>
- </div>
- <div className="bg-bull-500/10 rounded-lg p-2">
- <p className="text-[10px] text-bull-400">Take Profit</p>
- <p className="text-sm font-semibold text-bull-300">{trade.takeProfit}</p>
- </div>
- </div>
+      {/* Consistency Score */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] text-steel-400 uppercase tracking-wider">
+            Consistency Score
+          </span>
+          <span className={`text-[11px] stat-value font-semibold ${consistencyLabelColor}`}>
+            {consistencyLabel}
+          </span>
+        </div>
+        <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
+          <div
+            className={`absolute inset-y-0 left-0 rounded-full ${consistencyBarColor} transition-all duration-500`}
+            style={{ width: `${Math.min(consistencyCheck.maxDayPercent, 100)}%` }}
+          />
+          {/* Cap threshold marker */}
+          <div
+            className="absolute inset-y-0 w-px bg-ink-950/80"
+            style={{ left: `${cap}%` }}
+          />
+        </div>
+        <div className="flex items-center justify-between mt-2 text-[11px]">
+          <span className="text-steel-500">
+            Best day {formatCurrencyShort(consistencyCheck.maxDayProfit)} · Total{' '}
+            {formatCurrencyShort(consistencyCheck.totalProfit)}
+          </span>
+          <span className={`stat-value ${consistencyLabelColor}`}>
+            {consistencyCheck.maxDayPercent > 0 ? `${consistencyCheck.maxDayPercent.toFixed(1)}%` : '—'} / {cap}%
+          </span>
+        </div>
+      </div>
 
- {/* PnL Breakdown */}
- <div className="grid grid-cols-3 gap-2 text-center">
- <div>
- <p className="text-[10px] text-steel-500">Gross</p>
- <p className="text-sm font-semibold text-bull-400">+${trade.grossPnL.toFixed(2)}</p>
- </div>
- <div>
- <p className="text-[10px] text-steel-500">Commission</p>
- <p className="text-sm font-semibold text-bear-400">${trade.commission.toFixed(2)}</p>
- </div>
- <div>
- <p className="text-[10px] text-steel-500">Net</p>
- <p className="text-sm font-semibold text-bull-400">+${trade.netPnL.toFixed(2)}</p>
- </div>
- </div>
-
- {/* Conditions */}
- <div>
- <p className="text-[10px] text-steel-500 uppercase tracking-wide mb-1.5">
- Conditions Present
- </p>
- <div className="grid grid-cols-2 gap-1.5">
- {[
- { key: 'currencyStrength', label: 'Currency Strength' },
- { key: 'zoneConfirmed', label: 'Zone Confirmed' },
- { key: 'lorentzian', label: 'Lorentzian Arrow' },
- { key: 'momentum', label: 'Momentum Strong' },
- ].map(({ key, label }) => (
- <div
- key={key}
- className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium ${
- trade.conditions[key as keyof typeof trade.conditions]
- ? 'bg-bull-500/10 text-bull-400'
- : 'bg-ink-700/40 text-steel-600'
- }`}
- >
- <span>{trade.conditions[key as keyof typeof trade.conditions] ? '✅' : '⬜'}</span>
- {label}
- </div>
- ))}
- </div>
- </div>
-
- {/* Valid Day Flag */}
- <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold ${
- trade.validDay
- ? 'bg-bull-500/10 text-bull-400 border border-bull-500/20'
- : 'bg-warn-500/10 text-warn-400 border border-warn-500/20'
- }`}>
- <Clock className="h-3 w-3" />
- {trade.validDay
- ? 'Valid Trading Day - Counts toward payout'
- : 'Pending - Confirm valid day status with Upcomers'
- }
- </div>
-
- {/* Notes */}
- {trade.notes && (
- <div className="bg-ink-700/30 rounded-lg p-2">
- <p className="text-[10px] text-steel-500 mb-0.5">Notes</p>
- <p className="text-[11px] text-slate-300">{trade.notes}</p>
- </div>
- )}
- </div>
- )}
- </div>
- ))}
- </div>
- </div>
- );
+      {/* Evaluation status */}
+      <div className="mt-3 pt-3 border-t border-ink-700/40 flex items-center justify-between text-[11px]">
+        <span className="text-steel-500">{account.phase} · {account.profitSplit}% split</span>
+        <span
+          className={`stat-value ${
+            daysCompleted >= account.minTradingDays ? 'text-bull-400' : 'text-steel-400'
+          }`}
+        >
+          {daysCompleted}/{account.minTradingDays}d
+        </span>
+      </div>
+    </div>
+  );
 }
