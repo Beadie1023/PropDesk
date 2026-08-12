@@ -8,6 +8,9 @@ export const CURRENCY_STRENGTH_PAIRS = [
 export type CurrencyStrengthResult = {
   currency: string;
   strength: number;
+  direction: 'BUY' | 'SELL' | 'NONE'; // Added missing property
+  gbpScore: number;                   // Added missing property
+  audScore: number;                   // Added missing property
 };
 
 export type LorentzianSignal = {
@@ -28,7 +31,8 @@ export type Signal = {
   timestamp: number;
 };
 
-export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal {
+// Reverted parameter to single Candle to match fetchTwelveDataCandles return signature
+export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
   return {
     direction: 'NONE',
     confidence: 0,
@@ -42,6 +46,9 @@ export function computeCurrencyStrength(
   return {
     currency: 'GBP',
     strength: 50,
+    direction: 'NONE',
+    gbpScore: 50,
+    audScore: 50,
   };
 }
 
