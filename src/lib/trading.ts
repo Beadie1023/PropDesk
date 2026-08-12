@@ -1,237 +1,370 @@
-// Original signal-generation engine — NOT a port of any specific
-// TradingView author's script. Implements the general published concepts
-// (Lorentzian-distance KNN classification; multi-pair currency strength)
-// from scratch.
-//
-// This is a heuristic tool with no verified track record. It generates a
-// signal for you to evaluate and act on manually — it is never wired to
-// order placement.
+import type { Account, PayoutEstimate, RRKey, RiskStatus, Trade } from '@/types';
 
-import type { Candle } from './marketData';
+export const PIP = 0.0001;
 
-// ---------------------------------------------------------------------------
-// Indicators
-// ---------------------------------------------------------------------------
+export const RR_OPTIONS: RRKey[] = ['1:2', '1:3', '1:4'];
 
-function computeRSI(closes: number[], period: number): number[] {
-  const rsi: number[] = new Array(closes.length).fill(NaN);
-  if (closes.length <= period) return rsi;
-
-  let gains = 0;
-  let losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-  }
-  return rsi;
-}
-
-function computeROC(closes: number[], period: number): number[] {
-  const roc: number[] = new Array(closes.length).fill(NaN);
-  for (let i = period; i < closes.length; i++) {
-    const past = closes[i - period];
-    if (past !== 0) roc[i] = ((closes[i] - past) / past) * 100;
-  }
-  return roc;
-}
-
-// ---------------------------------------------------------------------------
-// Lorentzian-distance KNN classifier
-// ---------------------------------------------------------------------------
-
-// Lorentzian distance: sum of log(1 + |a_i - b_i|) per feature. Compresses
-// large feature differences into log-space, making the nearest-neighbor
-// search less dominated by any single volatile feature than Euclidean
-// distance would be.
-function lorentzianDistance(a: number[], b: number[]): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += Math.log(1 + Math.abs(a[i] - b[i]));
-  }
-  return sum;
-}
-
-export type LorentzianSignal = {
-  direction: 'bullish' | 'bearish' | 'neutral';
-  confidence: number; // 0-100, % of nearest neighbors that were bullish
-  neighborsUsed: number;
+export const rrRatio = (rr: RRKey): number => {
+  const map: Record<RRKey, number> = { '1:2': 2, '1:3': 3, '1:4': 4 };
+  return map[rr];
 };
 
-// How many bars ahead a historical point's outcome is measured over.
-const LOOKAHEAD_BARS = 4;
-// How many nearest neighbors vote on the current bar's classification.
-const K_NEIGHBORS = 20;
-// Confidence thresholds for calling a direction rather than "neutral".
-const BULLISH_THRESHOLD = 60;
-const BEARISH_THRESHOLD = 40;
-
-/**
- * Classifies the most recent bar as bullish/bearish/neutral by finding the
- * K historical bars with the most similar RSI(14)/RSI(9)/ROC(10) feature
- * vector (by Lorentzian distance) and taking a majority vote of what
- * price did LOOKAHEAD_BARS after each of those historical bars.
- *
- * Returns null if there isn't enough history to compute a reliable
- * result — callers must treat null as "no signal", never as neutral.
- */
-export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | null {
-  const MIN_CANDLES = 60;
-  if (candles.length < MIN_CANDLES) return null;
-
-  const closes = candles.map((c) => c.close);
-  const rsi14 = computeRSI(closes, 14);
-  const rsi9 = computeRSI(closes, 9);
-  const roc10 = computeROC(closes, 10);
-
-  type Point = { features: number[]; label: 0 | 1 };
-  const points: Point[] = [];
-
-  const minIdx = 15;
-  const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
-
-  for (let i = minIdx; i <= maxIdx; i++) {
-    if (Number.isNaN(rsi14[i]) || Number.isNaN(rsi9[i]) || Number.isNaN(roc10[i])) continue;
-    const future = closes[i + LOOKAHEAD_BARS];
-    const label: 0 | 1 = future > closes[i] ? 1 : 0;
-    points.push({ features: [rsi14[i], rsi9[i], roc10[i]], label });
-  }
-
-  if (points.length < K_NEIGHBORS) return null;
-
-  const lastIdx = closes.length - 1;
-  if (Number.isNaN(rsi14[lastIdx]) || Number.isNaN(rsi9[lastIdx]) || Number.isNaN(roc10[lastIdx])) {
-    return null;
-  }
-  const current = [rsi14[lastIdx], rsi9[lastIdx], roc10[lastIdx]];
-
-  const distances = points
-    .map((p) => ({ d: lorentzianDistance(current, p.features), label: p.label }))
-    .sort((a, b) => a.d - b.d);
-
-  const neighbors = distances.slice(0, K_NEIGHBORS);
-  const bullishVotes = neighbors.filter((n) => n.label === 1).length;
-  const confidence = (bullishVotes / neighbors.length) * 100;
-
-  let direction: LorentzianSignal['direction'] = 'neutral';
-  if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
-  else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
-
-  return { direction, confidence, neighborsUsed: neighbors.length };
-}
-
-// ---------------------------------------------------------------------------
-// Currency strength (5-step)
-// ---------------------------------------------------------------------------
-
-// Basket needed to derive GBP and AUD strength against a common USD
-// reference, plus EUR/JPY for a wider comparison basket.
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/USD', 'USD/JPY'] as const;
-
-export type CurrencyStrengthResult = {
-  gbpScore: number;
-  audScore: number;
-  differential: number; // gbpScore - audScore
-  direction: 'bullish' | 'bearish' | 'neutral'; // for GBP/AUD specifically
+export const roundToPip = (value: number): number => {
+  const decimals = value >= 100 ? 2 : 4;
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
 };
 
-const STRENGTH_LOOKBACK_BARS = 24; // ~1 day of hourly bars
-const STRENGTH_DIFFERENTIAL_THRESHOLD = 10; // on the normalized 0-100 scale
+export const formatPrice = (value: number): string => {
+  return value.toFixed(value >= 100 ? 2 : 4);
+};
 
-function pctChangeOverLookback(candles: Candle[]): number | null {
-  if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
-  const recent = candles[candles.length - 1].close;
-  const past = candles[candles.length - 1 - STRENGTH_LOOKBACK_BARS].close;
-  if (past === 0) return null;
-  return ((recent - past) / past) * 100;
-}
+export const formatCurrency = (value: number): string => {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
-/**
- * 5-step currency strength:
- *  1. Basket of pairs (CURRENCY_STRENGTH_PAIRS) covering GBP, AUD, EUR,
- *     JPY, all against USD as a common reference.
- *  2. % price change over STRENGTH_LOOKBACK_BARS for each pair.
- *  3. Convert each pair's change into a per-CURRENCY score (inverting
- *     USD/JPY since USD is the base currency in that pair).
- *  4. Normalize all scores onto a 0-100 scale across the basket.
- *  5. Differential = GBP score − AUD score → direction for GBP/AUD.
- *
- * Returns null if any required pair's data is missing/insufficient.
- */
-export function computeCurrencyStrength(
-  candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>>,
-): CurrencyStrengthResult | null {
-  const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] ?? []);
-  const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] ?? []);
-  const eurusd = pctChangeOverLookback(candlesByPair['EUR/USD'] ?? []);
-  const usdjpy = pctChangeOverLookback(candlesByPair['USD/JPY'] ?? []);
+export const formatCurrencyShort = (value: number): string => {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
+  return `${sign}$${abs.toFixed(0)}`;
+};
 
-  if (gbpusd === null || audusd === null || eurusd === null || usdjpy === null) {
-    return null;
-  }
+export const formatPercent = (value: number): string => {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)}%`;
+};
 
-  const rawScores: Record<string, number> = {
-    USD: 0,
-    GBP: gbpusd,
-    AUD: audusd,
-    EUR: eurusd,
-    JPY: -usdjpy, // USD/JPY rising means USD strengthened, JPY weakened
+export type CalcResult = {
+  sl: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  pipDistanceSL: number;
+  pipDistanceTP1: number;
+  pipDistanceTP2: number;
+  pipDistanceTP3: number;
+  perAccount: {
+    account: Account;
+    winAtTP1: number;
+    winAtTP2: number;
+    winAtTP3: number;
+    lossAtSL: number;
+    rrMultiple: number;
+  }[];
+  totalWin: number;
+  totalLoss: number;
+};
+
+export const calculateTrade = (
+  entryPrice: number,
+  rr: RRKey,
+  accounts: Account[],
+): CalcResult => {
+  const ratio = rrRatio(rr);
+  const sl = roundToPip(entryPrice - 10 * PIP);
+  const tp1 = roundToPip(entryPrice + 20 * PIP);
+  const tp2 = roundToPip(entryPrice + 30 * PIP);
+  const tp3 = roundToPip(entryPrice + 40 * PIP);
+
+  const pipDistanceSL = 10;
+  const pipDistanceTP1 = 20;
+  const pipDistanceTP2 = 30;
+  const pipDistanceTP3 = 40;
+
+  const perAccount = accounts.map((account) => {
+    const winAtTP1 = pipDistanceTP1 * account.pipValue;
+    const winAtTP2 = pipDistanceTP2 * account.pipValue;
+    const winAtTP3 = pipDistanceTP3 * account.pipValue;
+    const lossAtSL = pipDistanceSL * account.pipValue;
+    const rrMultiple = ratio;
+    return { account, winAtTP1, winAtTP2, winAtTP3, lossAtSL, rrMultiple };
+  });
+
+  const totalWin = perAccount.reduce((sum, a) => sum + a.winAtTP3, 0);
+  const totalLoss = perAccount.reduce((sum, a) => sum + a.lossAtSL, 0);
+
+  return {
+    sl,
+    tp1,
+    tp2,
+    tp3,
+    pipDistanceSL,
+    pipDistanceTP1,
+    pipDistanceTP2,
+    pipDistanceTP3,
+    perAccount,
+    totalWin,
+    totalLoss,
   };
-
-  const values = Object.values(rawScores);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const normalize = (v: number) => ((v - min) / range) * 100;
-
-  const gbpScore = normalize(rawScores.GBP);
-  const audScore = normalize(rawScores.AUD);
-  const differential = gbpScore - audScore;
-
-  let direction: CurrencyStrengthResult['direction'] = 'neutral';
-  if (differential >= STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bullish';
-  else if (differential <= -STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bearish';
-
-  return { gbpScore, audScore, differential, direction };
-}
-
-// ---------------------------------------------------------------------------
-// Combined signal
-// ---------------------------------------------------------------------------
-
-export type OverallSignal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'conflicting';
+};
 
 /**
- * Confluence of both sub-indicators. "conflicting" means they actively
- * disagree (one bullish, one bearish) — treated as its own state, not
- * averaged away to neutral, since that disagreement is itself meaningful
- * information (lower confidence in either read).
+ * Drawdown risk is measured against the account's floor balance (the stop-out
+ * line), relative to the buffer between the high-water mark and that floor.
  */
-export function combineSignals(
-  lorentzian: LorentzianSignal | null,
-  currencyStrength: CurrencyStrengthResult | null,
-): OverallSignal {
-  if (!lorentzian || !currencyStrength) return 'neutral';
+export const riskStatus = (account: Account): RiskStatus => {
+  if (account.balance <= account.floorBalance) return 'red';
+  const totalBuffer = account.highWaterMark - account.floorBalance;
+  if (totalBuffer <= 0) return 'green';
+  const used = account.highWaterMark - account.balance;
+  const usedRatio = used / totalBuffer;
+  if (usedRatio >= 0.75) return 'yellow';
+  return 'green';
+};
 
-  const l = lorentzian.direction;
-  const c = currencyStrength.direction;
+export const drawdownPct = (account: Account): number => {
+  const totalBuffer = account.highWaterMark - account.floorBalance;
+  if (totalBuffer <= 0) return 0;
+  const used = Math.max(account.highWaterMark - account.balance, 0);
+  return Math.min(used / totalBuffer, 1) * 100;
+};
 
-  if (l === 'bullish' && c === 'bullish') return 'strong_buy';
-  if (l === 'bearish' && c === 'bearish') return 'strong_sell';
-  if ((l === 'bullish' && c === 'bearish') || (l === 'bearish' && c === 'bullish')) return 'conflicting';
-  if (l === 'bullish' || c === 'bullish') return 'buy';
-  if (l === 'bearish' || c === 'bearish') return 'sell';
-  return 'neutral';
-}
+export const drawdownBufferRemaining = (account: Account): number =>
+  Math.max(account.balance - account.floorBalance, 0);
+
+/**
+ * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
+ * This estimates what a payout request right now would be worth.
+ *
+ * grossProfit is raw price P&L only (sum of dollar_amount). netProfit
+ * subtracts broker commission and swap — the actual amount that affects
+ * real balance and what's really payable. Eligibility and the split
+ * amount are based on netProfit, not gross: a trade can show a positive
+ * gross result but a near-zero or negative net result once fees are
+ * counted, and that net figure is what actually matters for payout.
+ */
+export const estimatePayout = (account: Account, trades: Trade[]): PayoutEstimate => {
+  const accountTrades = trades.filter((t) => t.account_name === account.name);
+
+  const grossProfit = accountTrades.reduce((sum, t) => sum + t.dollar_amount, 0);
+  const netProfit = accountTrades.reduce(
+    (sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0),
+    0,
+  );
+
+  const splitAmount = Math.max(netProfit, 0) * (account.profitSplit / 100);
+
+  return {
+    accountId: account.id,
+    accountName: account.name,
+    grossProfit,
+    netProfit,
+    splitAmount,
+    eligible: netProfit > 0,
+  };
+};
+
+export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
+  entries.reduce((sum, e) => sum + e.splitAmount, 0);
+
+/**
+ * Recomputes an account's balance from scratch as startingBalance plus the
+ * sum of every logged trade's net effect (dollar_amount + commission + swap)
+ * for that account. Commission/swap are typically already-signed costs in
+ * MT5 data (negative), so summing them alongside dollar_amount gives the
+ * real balance — the same figure the live MT5 account would show. Used
+ * after bulk operations like CSV import so balance stays consistent with
+ * the log.
+ */
+export const recalculateBalance = (account: Account, trades: Trade[]): number => {
+  const total = trades
+    .filter((t) => t.account_name === account.name)
+    .reduce((sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0), 0);
+  return account.startingBalance + total;
+};
+
+/**
+ * Counts distinct calendar dates on which the account logged at least one
+ * trade. Reads straight from the trades in storage — not a stored counter.
+ */
+export const tradingDaysCompleted = (accountName: string, trades: Trade[]): number => {
+  const dates = new Set(
+    trades.filter((t) => t.account_name === accountName).map((t) => t.trade_date),
+  );
+  return dates.size;
+};
+
+export type ConsistencyCheck = {
+  accountName: string;
+  totalProfit: number;
+  maxDayProfit: number;
+  maxDayDate: string | null;
+  maxDayPercent: number;
+  limit: number;
+  breached: boolean;
+};
+
+/**
+ * Consistency rule: no single calendar day's profit may account for more
+ * than the account's consistencyLimit percentage of total profit across all
+ * trading days. Recompute this after every trade is logged.
+ */
+export const checkConsistency = (account: Account, trades: Trade[]): ConsistencyCheck => {
+  const accountTrades = trades.filter((t) => t.account_name === account.name);
+
+  const dailyTotals = new Map<string, number>();
+  for (const t of accountTrades) {
+    dailyTotals.set(t.trade_date, (dailyTotals.get(t.trade_date) ?? 0) + t.dollar_amount);
+  }
+
+  const totalProfit = [...dailyTotals.values()].reduce((sum, v) => sum + v, 0);
+
+  let maxDayProfit = 0;
+  let maxDayDate: string | null = null;
+  for (const [date, profit] of dailyTotals.entries()) {
+    if (profit > maxDayProfit) {
+      maxDayProfit = profit;
+      maxDayDate = date;
+    }
+  }
+
+  const maxDayPercent = totalProfit > 0 ? (maxDayProfit / totalProfit) * 100 : 0;
+  const breached = totalProfit > 0 && maxDayPercent > account.consistencyLimit;
+
+  return {
+    accountName: account.name,
+    totalProfit,
+    maxDayProfit,
+    maxDayDate,
+    maxDayPercent,
+    limit: account.consistencyLimit,
+    breached,
+  };
+};
+
+export type ConsistencyStatus = 'safe' | 'warning' | 'breached' | 'early';
+
+/**
+ * Maps a ConsistencyCheck onto a graduated display state (used by both the
+ * Account Dashboard cards and the Payout Tracker) — the single place that
+ * decides what counts as "safe" vs "warning" vs "breached". No consistency
+ * math lives here, only the display-state thresholds.
+ */
+export const consistencyDisplayStatus = (
+  check: ConsistencyCheck,
+  dayCount: number,
+): ConsistencyStatus => {
+  if (check.totalProfit <= 0) return 'early';
+  if (check.breached) return 'breached';
+  const warningThreshold = check.limit - 5;
+  if (check.maxDayPercent >= warningThreshold) return 'warning';
+  if (dayCount < 2) return 'early';
+  return 'safe';
+};
+
+// Length of a reference period cycle, counted from the account's start
+// date. Upcomers' exact reference-period length wasn't specified — 30
+// days is the most common convention for this kind of rule at prop
+// firms, used here as the default. Adjust this constant if your actual
+// agreement specifies a different length.
+export const REFERENCE_PERIOD_DAYS = 30;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export type ReferencePeriodStatus = {
+  cycleNumber: number;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  daysRemaining: number;
+  daysElapsed: number;
+};
+
+/**
+ * The reference period is a recurring window (REFERENCE_PERIOD_DAYS long)
+ * counted from the account's start date — cycle 1 is days 0-30, cycle 2 is
+ * days 30-60, and so on. Returns which cycle "today" falls in and how many
+ * days remain in it.
+ */
+export const referencePeriodStatus = (account: Account, today: Date = new Date()): ReferencePeriodStatus => {
+  const start = new Date(`${account.startDate}T00:00:00Z`);
+  const daysSinceStart = Math.max(0, Math.floor((today.getTime() - start.getTime()) / MS_PER_DAY));
+
+  const cycleNumber = Math.floor(daysSinceStart / REFERENCE_PERIOD_DAYS) + 1;
+  const daysElapsed = daysSinceStart % REFERENCE_PERIOD_DAYS;
+  const daysRemaining = REFERENCE_PERIOD_DAYS - daysElapsed;
+
+  const cycleStart = new Date(start.getTime() + (cycleNumber - 1) * REFERENCE_PERIOD_DAYS * MS_PER_DAY);
+  const cycleEnd = new Date(cycleStart.getTime() + REFERENCE_PERIOD_DAYS * MS_PER_DAY);
+
+  return {
+    cycleNumber,
+    cycleStartDate: cycleStart.toISOString().slice(0, 10),
+    cycleEndDate: cycleEnd.toISOString().slice(0, 10),
+    daysRemaining,
+    daysElapsed,
+  };
+};
+
+export type FirstWithdrawalStatus = {
+  firstTradeDate: string | null;
+  eligibleDate: string | null;
+  daysRemaining: number | null;
+  eligible: boolean;
+};
+
+// Days after the first logged trade before a first withdrawal can be
+// requested, per the stated rule.
+export const FIRST_WITHDRAWAL_WAIT_DAYS = 14;
+
+/**
+ * First withdrawal eligibility: FIRST_WITHDRAWAL_WAIT_DAYS after the
+ * account's very first logged trade (not the account start date — the
+ * clock only starts once trading actually begins). Returns nulls if no
+ * trades have been logged yet, since there's no date to count from.
+ */
+export const firstWithdrawalStatus = (
+  accountName: string,
+  trades: Trade[],
+  today: Date = new Date(),
+): FirstWithdrawalStatus => {
+  const accountTrades = trades.filter((t) => t.account_name === accountName);
+  if (accountTrades.length === 0) {
+    return { firstTradeDate: null, eligibleDate: null, daysRemaining: null, eligible: false };
+  }
+
+  const firstTradeDate = accountTrades.reduce(
+    (earliest, t) => (t.trade_date < earliest ? t.trade_date : earliest),
+    accountTrades[0].trade_date,
+  );
+
+  const firstTrade = new Date(`${firstTradeDate}T00:00:00Z`);
+  const eligible = new Date(firstTrade.getTime() + FIRST_WITHDRAWAL_WAIT_DAYS * MS_PER_DAY);
+  const daysRemaining = Math.max(0, Math.ceil((eligible.getTime() - today.getTime()) / MS_PER_DAY));
+
+  return {
+    firstTradeDate,
+    eligibleDate: eligible.toISOString().slice(0, 10),
+    daysRemaining,
+    eligible: daysRemaining <= 0,
+  };
+};
+
+/**
+ * Hold duration in seconds, or null if either timestamp is missing —
+ * manually-logged trades have no time-of-day, only CSV-imported ones do.
+ */
+export const holdSeconds = (trade: Trade): number | null => {
+  if (!trade.open_time || !trade.close_time) return null;
+  const open = new Date(trade.open_time).getTime();
+  const close = new Date(trade.close_time).getTime();
+  if (Number.isNaN(open) || Number.isNaN(close)) return null;
+  return Math.max(0, (close - open) / 1000);
+};
+
+// Trades held under this many seconds are flagged as a possible
+// prohibited scalping strategy.
+export const PROHIBITED_HOLD_SECONDS = 60;
+
+/**
+ * True if a trade's hold time is below the prohibited threshold. Null
+ * (not true/false) when hold time can't be determined — this must never
+ * be treated as "not prohibited" by a caller, only as "unknown."
+ */
+export const isProhibitedHoldTime = (trade: Trade): boolean | null => {
+  const seconds = holdSeconds(trade);
+  if (seconds === null) return null;
+  return seconds < PROHIBITED_HOLD_SECONDS;
+};
