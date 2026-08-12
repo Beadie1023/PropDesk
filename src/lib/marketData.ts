@@ -10,15 +10,16 @@ export type Candle = {
 export async function fetchTwelveDataCandles(
  symbol: string,
  interval: string,
-): Promise<Candle[]> {
- return [];
+ count: number,
+): Promise<Candle> {
+ return ;
 }
 
 export async function fetchCandles(
  symbol: string,
  interval: string,
-): Promise<Candle[]> {
- return [];
+): Promise<Candle> {
+ return ;
 }
 
 export async function getLivePrice(symbol: string): Promise<number | null> {
