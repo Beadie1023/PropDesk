@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { LayoutGrid, Radio } from 'lucide-react';
+import { KeyRound, LayoutGrid, Radio } from 'lucide-react';
 import { Panel, StatusBadge } from '@/components/ui';
 import {
   checkConsistency,
+  consistencyDisplayStatus,
   drawdownBufferRemaining,
   drawdownPct,
   formatCurrency,
   formatCurrencyShort,
   riskStatus,
   tradingDaysCompleted,
-  type ConsistencyCheck,
 } from '@/lib/trading';
-import { connectAccount, type ConnectionStatus } from '@/lib/metaapi';
+import {
+  connectAccount,
+  credentialRefreshStatus,
+  type ConnectionStatus,
+  type CredentialRefreshStatus,
+} from '@/lib/metaapi';
 import type { Account, Trade } from '@/types';
 
 export function AccountDashboard({
@@ -27,6 +32,10 @@ export function AccountDashboard({
   );
 
   const [liveStatus, setLiveStatus] = useState<ConnectionStatus>('disconnected');
+  const [credentialStatus, setCredentialStatus] = useState<CredentialRefreshStatus>({
+    daysSinceSet: null,
+    dueForRefresh: false,
+  });
 
   // Auto-connect to the live MT5 account on load. Any failure (backend
   // unreachable, MetaApi credentials not set, account not deployed, etc.)
@@ -36,7 +45,10 @@ export function AccountDashboard({
   useEffect(() => {
     let cancelled = false;
     connectAccount().then((status) => {
-      if (!cancelled) setLiveStatus(status);
+      if (!cancelled) {
+        setLiveStatus(status);
+        setCredentialStatus(credentialRefreshStatus());
+      }
     });
     return () => {
       cancelled = true;
@@ -50,6 +62,15 @@ export function AccountDashboard({
       icon={<LayoutGrid className="h-5 w-5" />}
       action={
         <div className="flex items-center gap-3">
+          {credentialStatus.dueForRefresh && (
+            <div
+              className="chip border bg-warn-500/15 text-warn-400 border-warn-500/30"
+              title={`API key/token has been in use for ${credentialStatus.daysSinceSet} days`}
+            >
+              <KeyRound className="h-3 w-3" />
+              Rotate credentials
+            </div>
+          )}
           <div
             className={`chip border ${
               liveStatus === 'connected'
@@ -81,23 +102,6 @@ export function AccountDashboard({
       </div>
     </Panel>
   );
-}
-
-type ConsistencyStatus = 'safe' | 'warning' | 'breached' | 'early';
-
-/**
- * Maps the canonical ConsistencyCheck (from trading.ts — the same check
- * that drives the Risk Alert Panel's breach warning) onto a graduated
- * display state for this card's progress bar. No consistency math lives
- * here; this only decides which color/label a given result gets.
- */
-function consistencyDisplayStatus(check: ConsistencyCheck, dayCount: number): ConsistencyStatus {
-  if (check.totalProfit <= 0) return 'early';
-  if (check.breached) return 'breached';
-  const warningThreshold = check.limit - 5;
-  if (check.maxDayPercent >= warningThreshold) return 'warning';
-  if (dayCount < 2) return 'early';
-  return 'safe';
 }
 
 function AccountCard({ account, trades }: { account: Account; trades: Trade[] }) {
@@ -230,25 +234,47 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade[] })
       </div>
 
       {/* Consistency Score */}
-      <div>
+      <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] text-steel-400 uppercase tracking-wider">
             Consistency Score
           </span>
-          <span className={`text-[11px] font-semibold ${consistencyLabelColor}`}>
-            {consistencyLabel} ({consistencyCheck.maxDayPercent.toFixed(0)}%)
+          <span className={`text-[11px] stat-value font-semibold ${consistencyLabelColor}`}>
+            {consistencyLabel}
           </span>
         </div>
-        <div className="relative h-2 rounded-full bg-ink-900 overflow-hidden">
+        <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
           <div
             className={`absolute inset-y-0 left-0 rounded-full ${consistencyBarColor} transition-all duration-500`}
             style={{ width: `${Math.min(consistencyCheck.maxDayPercent, 100)}%` }}
           />
+          {/* Cap threshold marker */}
+          <div
+            className="absolute inset-y-0 w-px bg-ink-950/80"
+            style={{ left: `${cap}%` }}
+          />
         </div>
-        <div className="flex items-center justify-between mt-2 text-[11px] text-steel-500">
-          <span>Cap: {cap}%</span>
-          <span>{daysCompleted} Days Traded</span>
+        <div className="flex items-center justify-between mt-2 text-[11px]">
+          <span className="text-steel-500">
+            Best day {formatCurrencyShort(consistencyCheck.maxDayProfit)} · Total{' '}
+            {formatCurrencyShort(consistencyCheck.totalProfit)}
+          </span>
+          <span className={`stat-value ${consistencyLabelColor}`}>
+            {consistencyCheck.maxDayPercent > 0 ? `${consistencyCheck.maxDayPercent.toFixed(1)}%` : '—'} / {cap}%
+          </span>
         </div>
+      </div>
+
+      {/* Evaluation status */}
+      <div className="mt-3 pt-3 border-t border-ink-700/40 flex items-center justify-between text-[11px]">
+        <span className="text-steel-500">{account.phase} · {account.profitSplit}% split</span>
+        <span
+          className={`stat-value ${
+            daysCompleted >= account.minTradingDays ? 'text-bull-400' : 'text-steel-400'
+          }`}
+        >
+          {daysCompleted}/{account.minTradingDays}d
+        </span>
       </div>
     </div>
   );
