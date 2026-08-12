@@ -1,9 +1,9 @@
 import type { Candle } from '@/lib/marketData';
 
-export const CURRENCY_STRENGTH_PAIRS: string[] = [
+export const CURRENCY_STRENGTH_PAIRS = [
  'GBPUSD', 'GBPJPY', 'GBPAUD', 'GBPCAD', 'GBPCHF',
  'AUDUSD', 'AUDJPY', 'AUDCAD', 'AUDCHF',
-];
+] as const;
 
 export type CurrencyStrengthResult = {
  currency: string;
@@ -28,24 +28,21 @@ export type Signal = {
  timestamp: number;
 };
 
-export function computeCurrencyStrength(
- symbol: string,
- candles: Candle[],
-): CurrencyStrengthResult {
- return { currency: symbol, strength: 0 };
-}
-
-export function computeLorentzianSignal(
- candles: Candle[],
-): LorentzianSignal {
+export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
  return {
  direction: 'NONE',
  confidence: 0,
- timestamp: Date.now(),
+ timestamp: Date.now,
  };
 }
 
-export function detectSignal(): Signal {
+export function computeCurrencyStrength(
+ candlesByPair: Partial<Record<string, Candle>>,
+): CurrencyStrengthResult {
+ return ;
+}
+
+export function detectSignal: Signal {
  return {
  direction: 'NONE',
  confidence: 0,
@@ -55,6 +52,6 @@ export function detectSignal(): Signal {
  lorentzian: false,
  momentum: false,
  },
- timestamp: Date.now(),
+ timestamp: Date.now,
  };
 }
