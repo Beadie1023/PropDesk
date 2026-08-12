@@ -1,216 +1,237 @@
-import type { Account, PayoutEstimate, RRKey, RiskStatus, Trade } from '@/types';
+// Original signal-generation engine — NOT a port of any specific
+// TradingView author's script. Implements the general published concepts
+// (Lorentzian-distance KNN classification; multi-pair currency strength)
+// from scratch.
+//
+// This is a heuristic tool with no verified track record. It generates a
+// signal for you to evaluate and act on manually — it is never wired to
+// order placement.
 
-export const PIP = 0.0001;
+import type { Candle } from './marketData';
 
-export const RR_OPTIONS: RRKey[] = ['1:2', '1:3', '1:4'];
+// ---------------------------------------------------------------------------
+// Indicators
+// ---------------------------------------------------------------------------
 
-export const rrRatio = (rr: RRKey): number => {
-  const map: Record<RRKey, number> = { '1:2': 2, '1:3': 3, '1:4': 4 };
-  return map[rr];
+function computeRSI(closes: number[], period: number): number[] {
+  const rsi: number[] = new Array(closes.length).fill(NaN);
+  if (closes.length <= period) return rsi;
+
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = closes[i] - closes[i - 1];
+    if (diff >= 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period + 1; i < closes.length; i++) {
+    const diff = closes[i] - closes[i - 1];
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return rsi;
+}
+
+function computeROC(closes: number[], period: number): number[] {
+  const roc: number[] = new Array(closes.length).fill(NaN);
+  for (let i = period; i < closes.length; i++) {
+    const past = closes[i - period];
+    if (past !== 0) roc[i] = ((closes[i] - past) / past) * 100;
+  }
+  return roc;
+}
+
+// ---------------------------------------------------------------------------
+// Lorentzian-distance KNN classifier
+// ---------------------------------------------------------------------------
+
+// Lorentzian distance: sum of log(1 + |a_i - b_i|) per feature. Compresses
+// large feature differences into log-space, making the nearest-neighbor
+// search less dominated by any single volatile feature than Euclidean
+// distance would be.
+function lorentzianDistance(a: number[], b: number[]): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += Math.log(1 + Math.abs(a[i] - b[i]));
+  }
+  return sum;
+}
+
+export type LorentzianSignal = {
+  direction: 'bullish' | 'bearish' | 'neutral';
+  confidence: number; // 0-100, % of nearest neighbors that were bullish
+  neighborsUsed: number;
 };
 
-export const roundToPip = (value: number): number => {
-  const decimals = value >= 100 ? 2 : 4;
-  const factor = Math.pow(10, decimals);
-  return Math.round(value * factor) / factor;
-};
-
-export const formatPrice = (value: number): string => {
-  return value.toFixed(value >= 100 ? 2 : 4);
-};
-
-export const formatCurrency = (value: number): string => {
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-
-export const formatCurrencyShort = (value: number): string => {
-  const sign = value < 0 ? '-' : '';
-  const abs = Math.abs(value);
-  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
-  return `${sign}$${abs.toFixed(0)}`;
-};
-
-export const formatPercent = (value: number): string => {
-  const sign = value > 0 ? '+' : '';
-  return `${sign}${value.toFixed(1)}%`;
-};
-
-export type CalcResult = {
-  sl: number;
-  tp1: number;
-  tp2: number;
-  tp3: number;
-  pipDistanceSL: number;
-  pipDistanceTP1: number;
-  pipDistanceTP2: number;
-  pipDistanceTP3: number;
-  perAccount: {
-    account: Account;
-    winAtTP1: number;
-    winAtTP2: number;
-    winAtTP3: number;
-    lossAtSL: number;
-    rrMultiple: number;
-  }[];
-  totalWin: number;
-  totalLoss: number;
-};
-
-export const calculateTrade = (
-  entryPrice: number,
-  rr: RRKey,
-  accounts: Account[],
-): CalcResult => {
-  const ratio = rrRatio(rr);
-  const sl = roundToPip(entryPrice - 10 * PIP);
-  const tp1 = roundToPip(entryPrice + 20 * PIP);
-  const tp2 = roundToPip(entryPrice + 30 * PIP);
-  const tp3 = roundToPip(entryPrice + 40 * PIP);
-
-  const pipDistanceSL = 10;
-  const pipDistanceTP1 = 20;
-  const pipDistanceTP2 = 30;
-  const pipDistanceTP3 = 40;
-
-  const perAccount = accounts.map((account) => {
-    const winAtTP1 = pipDistanceTP1 * account.pipValue;
-    const winAtTP2 = pipDistanceTP2 * account.pipValue;
-    const winAtTP3 = pipDistanceTP3 * account.pipValue;
-    const lossAtSL = pipDistanceSL * account.pipValue;
-    const rrMultiple = ratio;
-    return { account, winAtTP1, winAtTP2, winAtTP3, lossAtSL, rrMultiple };
-  });
-
-  const totalWin = perAccount.reduce((sum, a) => sum + a.winAtTP3, 0);
-  const totalLoss = perAccount.reduce((sum, a) => sum + a.lossAtSL, 0);
-
-  return {
-    sl,
-    tp1,
-    tp2,
-    tp3,
-    pipDistanceSL,
-    pipDistanceTP1,
-    pipDistanceTP2,
-    pipDistanceTP3,
-    perAccount,
-    totalWin,
-    totalLoss,
-  };
-};
+// How many bars ahead a historical point's outcome is measured over.
+const LOOKAHEAD_BARS = 4;
+// How many nearest neighbors vote on the current bar's classification.
+const K_NEIGHBORS = 20;
+// Confidence thresholds for calling a direction rather than "neutral".
+const BULLISH_THRESHOLD = 60;
+const BEARISH_THRESHOLD = 40;
 
 /**
- * Drawdown risk is measured against the account's floor balance (the stop-out
- * line), relative to the buffer between the high-water mark and that floor.
+ * Classifies the most recent bar as bullish/bearish/neutral by finding the
+ * K historical bars with the most similar RSI(14)/RSI(9)/ROC(10) feature
+ * vector (by Lorentzian distance) and taking a majority vote of what
+ * price did LOOKAHEAD_BARS after each of those historical bars.
+ *
+ * Returns null if there isn't enough history to compute a reliable
+ * result — callers must treat null as "no signal", never as neutral.
  */
-export const riskStatus = (account: Account): RiskStatus => {
-  if (account.balance <= account.floorBalance) return 'red';
-  const totalBuffer = account.highWaterMark - account.floorBalance;
-  if (totalBuffer <= 0) return 'green';
-  const used = account.highWaterMark - account.balance;
-  const usedRatio = used / totalBuffer;
-  if (usedRatio >= 0.75) return 'yellow';
-  return 'green';
-};
+export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | null {
+  const MIN_CANDLES = 60;
+  if (candles.length < MIN_CANDLES) return null;
 
-export const drawdownPct = (account: Account): number => {
-  const totalBuffer = account.highWaterMark - account.floorBalance;
-  if (totalBuffer <= 0) return 0;
-  const used = Math.max(account.highWaterMark - account.balance, 0);
-  return Math.min(used / totalBuffer, 1) * 100;
-};
+  const closes = candles.map((c) => c.close);
+  const rsi14 = computeRSI(closes, 14);
+  const rsi9 = computeRSI(closes, 9);
+  const roc10 = computeROC(closes, 10);
 
-export const drawdownBufferRemaining = (account: Account): number =>
-  Math.max(account.balance - account.floorBalance, 0);
+  type Point = { features: number[]; label: 0 | 1 };
+  const points: Point[] = [];
 
-/**
- * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
- * This estimates what a payout request right now would be worth.
- */
-export const estimatePayout = (account: Account): PayoutEstimate => {
-  const grossProfit = Math.max(account.balance - account.startingBalance, 0);
-  const splitAmount = grossProfit * (account.profitSplit / 100);
-  return {
-    accountId: account.id,
-    accountName: account.name,
-    grossProfit,
-    splitAmount,
-    eligible: grossProfit > 0,
-  };
-};
+  const minIdx = 15;
+  const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
 
-export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
-  entries.reduce((sum, e) => sum + e.splitAmount, 0);
-
-/**
- * Recomputes an account's balance from scratch as startingBalance plus the
- * sum of every logged trade's dollar_amount for that account. Used after
- * bulk operations like CSV import so balance stays consistent with the log.
- */
-export const recalculateBalance = (account: Account, trades: Trade[]): number => {
-  const total = trades
-    .filter((t) => t.account_name === account.name)
-    .reduce((sum, t) => sum + t.dollar_amount, 0);
-  return account.startingBalance + total;
-};
-
-/**
- * Counts distinct calendar dates on which the account logged at least one
- * trade. Reads straight from the trades in storage — not a stored counter.
- */
-export const tradingDaysCompleted = (accountName: string, trades: Trade[]): number => {
-  const dates = new Set(
-    trades.filter((t) => t.account_name === accountName).map((t) => t.trade_date),
-  );
-  return dates.size;
-};
-
-export type ConsistencyCheck = {
-  accountName: string;
-  totalProfit: number;
-  maxDayProfit: number;
-  maxDayDate: string | null;
-  maxDayPercent: number;
-  limit: number;
-  breached: boolean;
-};
-
-/**
- * Consistency rule: no single calendar day's profit may account for more
- * than the account's consistencyLimit percentage of total profit across all
- * trading days. Recompute this after every trade is logged.
- */
-export const checkConsistency = (account: Account, trades: Trade[]): ConsistencyCheck => {
-  const accountTrades = trades.filter((t) => t.account_name === account.name);
-
-  const dailyTotals = new Map<string, number>();
-  for (const t of accountTrades) {
-    dailyTotals.set(t.trade_date, (dailyTotals.get(t.trade_date) ?? 0) + t.dollar_amount);
+  for (let i = minIdx; i <= maxIdx; i++) {
+    if (Number.isNaN(rsi14[i]) || Number.isNaN(rsi9[i]) || Number.isNaN(roc10[i])) continue;
+    const future = closes[i + LOOKAHEAD_BARS];
+    const label: 0 | 1 = future > closes[i] ? 1 : 0;
+    points.push({ features: [rsi14[i], rsi9[i], roc10[i]], label });
   }
 
-  const totalProfit = [...dailyTotals.values()].reduce((sum, v) => sum + v, 0);
+  if (points.length < K_NEIGHBORS) return null;
 
-  let maxDayProfit = 0;
-  let maxDayDate: string | null = null;
-  for (const [date, profit] of dailyTotals.entries()) {
-    if (profit > maxDayProfit) {
-      maxDayProfit = profit;
-      maxDayDate = date;
-    }
+  const lastIdx = closes.length - 1;
+  if (Number.isNaN(rsi14[lastIdx]) || Number.isNaN(rsi9[lastIdx]) || Number.isNaN(roc10[lastIdx])) {
+    return null;
+  }
+  const current = [rsi14[lastIdx], rsi9[lastIdx], roc10[lastIdx]];
+
+  const distances = points
+    .map((p) => ({ d: lorentzianDistance(current, p.features), label: p.label }))
+    .sort((a, b) => a.d - b.d);
+
+  const neighbors = distances.slice(0, K_NEIGHBORS);
+  const bullishVotes = neighbors.filter((n) => n.label === 1).length;
+  const confidence = (bullishVotes / neighbors.length) * 100;
+
+  let direction: LorentzianSignal['direction'] = 'neutral';
+  if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
+  else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
+
+  return { direction, confidence, neighborsUsed: neighbors.length };
+}
+
+// ---------------------------------------------------------------------------
+// Currency strength (5-step)
+// ---------------------------------------------------------------------------
+
+// Basket needed to derive GBP and AUD strength against a common USD
+// reference, plus EUR/JPY for a wider comparison basket.
+export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/USD', 'USD/JPY'] as const;
+
+export type CurrencyStrengthResult = {
+  gbpScore: number;
+  audScore: number;
+  differential: number; // gbpScore - audScore
+  direction: 'bullish' | 'bearish' | 'neutral'; // for GBP/AUD specifically
+};
+
+const STRENGTH_LOOKBACK_BARS = 24; // ~1 day of hourly bars
+const STRENGTH_DIFFERENTIAL_THRESHOLD = 10; // on the normalized 0-100 scale
+
+function pctChangeOverLookback(candles: Candle[]): number | null {
+  if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
+  const recent = candles[candles.length - 1].close;
+  const past = candles[candles.length - 1 - STRENGTH_LOOKBACK_BARS].close;
+  if (past === 0) return null;
+  return ((recent - past) / past) * 100;
+}
+
+/**
+ * 5-step currency strength:
+ *  1. Basket of pairs (CURRENCY_STRENGTH_PAIRS) covering GBP, AUD, EUR,
+ *     JPY, all against USD as a common reference.
+ *  2. % price change over STRENGTH_LOOKBACK_BARS for each pair.
+ *  3. Convert each pair's change into a per-CURRENCY score (inverting
+ *     USD/JPY since USD is the base currency in that pair).
+ *  4. Normalize all scores onto a 0-100 scale across the basket.
+ *  5. Differential = GBP score − AUD score → direction for GBP/AUD.
+ *
+ * Returns null if any required pair's data is missing/insufficient.
+ */
+export function computeCurrencyStrength(
+  candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>>,
+): CurrencyStrengthResult | null {
+  const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] ?? []);
+  const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] ?? []);
+  const eurusd = pctChangeOverLookback(candlesByPair['EUR/USD'] ?? []);
+  const usdjpy = pctChangeOverLookback(candlesByPair['USD/JPY'] ?? []);
+
+  if (gbpusd === null || audusd === null || eurusd === null || usdjpy === null) {
+    return null;
   }
 
-  const maxDayPercent = totalProfit > 0 ? (maxDayProfit / totalProfit) * 100 : 0;
-  const breached = totalProfit > 0 && maxDayPercent > account.consistencyLimit;
-
-  return {
-    accountName: account.name,
-    totalProfit,
-    maxDayProfit,
-    maxDayDate,
-    maxDayPercent,
-    limit: account.consistencyLimit,
-    breached,
+  const rawScores: Record<string, number> = {
+    USD: 0,
+    GBP: gbpusd,
+    AUD: audusd,
+    EUR: eurusd,
+    JPY: -usdjpy, // USD/JPY rising means USD strengthened, JPY weakened
   };
-};
+
+  const values = Object.values(rawScores);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const normalize = (v: number) => ((v - min) / range) * 100;
+
+  const gbpScore = normalize(rawScores.GBP);
+  const audScore = normalize(rawScores.AUD);
+  const differential = gbpScore - audScore;
+
+  let direction: CurrencyStrengthResult['direction'] = 'neutral';
+  if (differential >= STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bullish';
+  else if (differential <= -STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bearish';
+
+  return { gbpScore, audScore, differential, direction };
+}
+
+// ---------------------------------------------------------------------------
+// Combined signal
+// ---------------------------------------------------------------------------
+
+export type OverallSignal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'conflicting';
+
+/**
+ * Confluence of both sub-indicators. "conflicting" means they actively
+ * disagree (one bullish, one bearish) — treated as its own state, not
+ * averaged away to neutral, since that disagreement is itself meaningful
+ * information (lower confidence in either read).
+ */
+export function combineSignals(
+  lorentzian: LorentzianSignal | null,
+  currencyStrength: CurrencyStrengthResult | null,
+): OverallSignal {
+  if (!lorentzian || !currencyStrength) return 'neutral';
+
+  const l = lorentzian.direction;
+  const c = currencyStrength.direction;
+
+  if (l === 'bullish' && c === 'bullish') return 'strong_buy';
+  if (l === 'bearish' && c === 'bearish') return 'strong_sell';
+  if ((l === 'bullish' && c === 'bearish') || (l === 'bearish' && c === 'bullish')) return 'conflicting';
+  if (l === 'bullish' || c === 'bullish') return 'buy';
+  if (l === 'bearish' || c === 'bearish') return 'sell';
+  return 'neutral';
+}
