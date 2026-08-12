@@ -28,9 +28,12 @@ export function AIAdvisorPanel() {
         ),
       ]);
 
-      const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle>> = {};
+      // Using a string record safely bypasses the strict literal index type checking
+      const candlesByPair: Record<string, Candle> = {};
       CURRENCY_STRENGTH_PAIRS.forEach((symbol: string, i: number) => {
-        candlesByPair[symbol] = basket[i];
+        if (basket[i]) {
+          candlesByPair[symbol] = basket[i];
+        }
       });
 
       const lorentzian = computeLorentzianSignal(gbpaud);
