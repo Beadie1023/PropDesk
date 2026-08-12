@@ -230,47 +230,25 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade[] })
       </div>
 
       {/* Consistency Score */}
-      <div className="mb-4">
+      <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-[11px] text-steel-400 uppercase tracking-wider">
             Consistency Score
           </span>
-          <span className={`text-[11px] stat-value font-semibold ${consistencyLabelColor}`}>
-            {consistencyLabel}
+          <span className={`text-[11px] font-semibold ${consistencyLabelColor}`}>
+            {consistencyLabel} ({consistencyCheck.maxDayPercent.toFixed(0)}%)
           </span>
         </div>
-        <div className="relative h-2.5 rounded-full bg-ink-900 overflow-hidden">
+        <div className="relative h-2 rounded-full bg-ink-900 overflow-hidden">
           <div
             className={`absolute inset-y-0 left-0 rounded-full ${consistencyBarColor} transition-all duration-500`}
             style={{ width: `${Math.min(consistencyCheck.maxDayPercent, 100)}%` }}
           />
-          {/* Cap threshold marker */}
-          <div
-            className="absolute inset-y-0 w-px bg-ink-950/80"
-            style={{ left: `${cap}%` }}
-          />
         </div>
-        <div className="flex items-center justify-between mt-2 text-[11px]">
-          <span className="text-steel-500">
-            Best day {formatCurrencyShort(consistencyCheck.maxDayProfit)} · Total{' '}
-            {formatCurrencyShort(consistencyCheck.totalProfit)}
-          </span>
-          <span className={`stat-value ${consistencyLabelColor}`}>
-            {consistencyCheck.maxDayPercent > 0 ? `${consistencyCheck.maxDayPercent.toFixed(1)}%` : '—'} / {cap}%
-          </span>
+        <div className="flex items-center justify-between mt-2 text-[11px] text-steel-500">
+          <span>Cap: {cap}%</span>
+          <span>{daysCompleted} Days Traded</span>
         </div>
-      </div>
-
-      {/* Evaluation status */}
-      <div className="mt-3 pt-3 border-t border-ink-700/40 flex items-center justify-between text-[11px]">
-        <span className="text-steel-500">{account.phase} · {account.profitSplit}% split</span>
-        <span
-          className={`stat-value ${
-            daysCompleted >= account.minTradingDays ? 'text-bull-400' : 'text-steel-400'
-          }`}
-        >
-          {daysCompleted}/{account.minTradingDays}d
-        </span>
       </div>
     </div>
   );
