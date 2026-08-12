@@ -32,7 +32,7 @@ export type Pair = 'GBPAUD';
 
 const API_BASE = import.meta.env.VITE_METAAPI_BACKEND_URL || '/api/metaapi';
 
-const apiHeaders = (extra?: Record<string, string>): Record<string, string> => ({
+export const apiHeaders = (extra?: Record<string, string>): Record<string, string> => ({
   'x-api-key': import.meta.env.VITE_METAAPI_API_KEY || '',
   ...extra,
 });
@@ -50,11 +50,55 @@ export async function connectAccount(): Promise<ConnectionStatus> {
       throw new Error(`Connect request failed with status ${res.status}`);
     }
     const data = await res.json();
-    return data.connected ? 'connected' : 'disconnected';
+    const status: ConnectionStatus = data.connected ? 'connected' : 'disconnected';
+    if (status === 'connected') recordSuccessfulConnection();
+    return status;
   } catch (err) {
     console.error('MetaApi connection failed:', err);
     return 'disconnected';
   }
+}
+
+const CREDENTIAL_SET_AT_KEY = 'propdesk:credential_set_at';
+const CREDENTIAL_REFRESH_INTERVAL_DAYS = 90;
+
+/**
+ * Marks "now" as when the current credentials were first confirmed
+ * working, if not already recorded. Only ever set once — rotating the
+ * actual key requires clearing this manually or via resetCredentialClock.
+ */
+function recordSuccessfulConnection(): void {
+  if (!localStorage.getItem(CREDENTIAL_SET_AT_KEY)) {
+    localStorage.setItem(CREDENTIAL_SET_AT_KEY, new Date().toISOString());
+  }
+}
+
+/**
+ * Call this after actually rotating METAAPI_API_KEY / METAAPI_TOKEN, so
+ * the reminder clock restarts from the new credential's set date.
+ */
+export function resetCredentialClock(): void {
+  localStorage.removeItem(CREDENTIAL_SET_AT_KEY);
+}
+
+export type CredentialRefreshStatus = {
+  daysSinceSet: number | null;
+  dueForRefresh: boolean;
+};
+
+/**
+ * Security-hygiene reminder, not a hard requirement from MetaApi itself —
+ * MetaApi tokens don't expire on a fixed schedule by default. 90 days is
+ * a reasonable default rotation cadence; adjust CREDENTIAL_REFRESH_INTERVAL_DAYS
+ * if your own policy differs.
+ */
+export function credentialRefreshStatus(): CredentialRefreshStatus {
+  const raw = localStorage.getItem(CREDENTIAL_SET_AT_KEY);
+  if (!raw) return { daysSinceSet: null, dueForRefresh: false };
+  const setAt = new Date(raw).getTime();
+  if (Number.isNaN(setAt)) return { daysSinceSet: null, dueForRefresh: false };
+  const daysSinceSet = Math.floor((Date.now() - setAt) / (24 * 60 * 60 * 1000));
+  return { daysSinceSet, dueForRefresh: daysSinceSet >= CREDENTIAL_REFRESH_INTERVAL_DAYS };
 }
 
 /**
