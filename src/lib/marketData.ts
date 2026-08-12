@@ -7,8 +7,18 @@ export type Candle = {
  volume: number;
 };
 
-export async function fetchCandles(symbol: string, interval: string): Promise<Candle> {
- return;
+export async function fetchTwelveDataCandles(
+ symbol: string,
+ interval: string,
+): Promise<Candle[]> {
+ return [];
+}
+
+export async function fetchCandles(
+ symbol: string,
+ interval: string,
+): Promise<Candle[]> {
+ return [];
 }
 
 export async function getLivePrice(symbol: string): Promise<number | null> {
