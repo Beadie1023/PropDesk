@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import { connectAccount, getAccountInfo, placeOrder, isConnected } from './metaapiClient.js';
+import { analyzeMarket } from './aiAdvisor.js';
 
 const app = express();
 
@@ -136,6 +137,17 @@ app.post('/api/metaapi/place-order', async (req, res) => {
     res.json({ orderId: result.orderId ?? result.positionId ?? null, raw: result });
   } catch (err) {
     res.status(502).json({ message: err instanceof Error ? err.message : 'Order failed' });
+  }
+});
+
+app.post('/api/ai/analyze', async (req, res) => {
+  const payload = req.body || {};
+
+  try {
+    const analysis = await analyzeMarket(payload);
+    res.json({ analysis });
+  } catch (err) {
+    res.status(502).json({ message: err instanceof Error ? err.message : 'Analysis failed' });
   }
 });
 
