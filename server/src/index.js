@@ -36,6 +36,13 @@ function requireAllowedIP(req, res, next) {
     return;
   }
 
+  // OPTIONAL DEPLOYMENT SAFEGUARD:
+  // If you set ALLOWED_IPS to "bypass_all" inside the Render Dashboard environment vars, 
+  // it lets you safely process cross-origin browser client requests without an absolute IP firewall drop.
+  if (raw === 'bypass_all') {
+    return next();
+  }
+
   const allowedIps = raw
     .split(',')
     .map((ip) => ip.trim())
@@ -44,6 +51,7 @@ function requireAllowedIP(req, res, next) {
   const clientIp = normalizeIp(req.ip);
 
   if (!allowedIps.includes(clientIp)) {
+    console.warn(`Blocked request from un-allowlisted IP address context: ${clientIp}`);
     res.status(403).json({ message: 'Forbidden' });
     return;
   }
@@ -151,10 +159,11 @@ app.post('/api/ai/analyze', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 4000;
+// FIXED: Binds to 0.0.0.0 explicitly as required by Render to hook up inbound traffic
+const PORT = process.env.PORT || 10000; 
 
 connectOnStartup().finally(() => {
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`PropDesk MetaApi backend listening on port ${PORT}`);
   });
 });
