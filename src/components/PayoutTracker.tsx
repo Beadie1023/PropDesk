@@ -99,8 +99,10 @@ function PayoutAccountCard({
   const daysCompleted = tradingDaysCompleted(account.name, trades);
   const consistency = checkConsistency(account, trades);
   const status = consistencyDisplayStatus(consistency, daysCompleted);
-  const referencePeriod = referencePeriodStatus(account);
-  const firstWithdrawal = firstWithdrawalStatus(account.name, trades);
+  
+  // Handled using updated helper contracts matching `src/lib/trading.ts` signatures
+  const referencePeriod = referencePeriodStatus(trades);
+  const firstWithdrawal = firstWithdrawalStatus(account, daysCompleted);
 
   const statusLabel =
     status === 'breached' ? 'Breached' : status === 'warning' ? 'Watch' : status === 'early' ? 'Building' : 'Safe';
@@ -120,14 +122,10 @@ function PayoutAccountCard({
     (estimate?.netProfit ?? 0) > 0;
   const daysToMin = Math.max(0, account.minTradingDays - daysCompleted);
 
-  // Real average-based projection: extrapolates from this account's actual
-  // average NET profit per trading day so far. Zero trading days so far
-  // means zero basis to project from — shown as $0 rather than guessed.
   const avgDailyNetProfit = daysCompleted > 0 ? (estimate?.netProfit ?? 0) / daysCompleted : 0;
   const projected5Day = Math.max(avgDailyNetProfit, 0) * 5 * (account.profitSplit / 100);
   const projected20Day = Math.max(avgDailyNetProfit, 0) * 20 * (account.profitSplit / 100);
 
-  // Today's session, from real logged trades only.
   const today = todayKey();
   const todayTrades = trades.filter((t) => t.account_name === account.name && t.trade_date === today);
   const todayProfit = todayTrades.reduce((sum, t) => sum + t.dollar_amount, 0);
@@ -153,7 +151,7 @@ function PayoutAccountCard({
         )}
       </div>
 
-      {/* Core payout figures — net drives the actual payable amount */}
+      {/* Core payout figures */}
       <div className="space-y-1.5 text-[11px] text-steel-400">
         <div className="flex justify-between">
           <span>Profit split</span>
@@ -194,88 +192,43 @@ function PayoutAccountCard({
           />
         </div>
         {daysToMin > 0 && (
-          <p className="text-[11px] text-steel-500 mt-1">{daysToMin} day{daysToMin === 1 ? '' : 's'} to minimum</p>
+          <p className="text-[10px] text-steel-500 mt-1">
+            {daysToMin} more minimum trading days required to request a payout.
+          </p>
         )}
       </div>
 
-      {/* Consistency */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[11px] text-steel-400 uppercase tracking-wider">Consistency</span>
-          <span className={`text-[11px] stat-value font-semibold ${statusColor}`}>{statusLabel}</span>
+      {/* Extended Validation Details */}
+      <div className="pt-2 border-t border-ink-700/40 space-y-1.5 text-[11px] text-steel-500">
+        <div className="flex justify-between">
+          <span>Consistency State</span>
+          <span className={`font-semibold ${statusColor}`}>{statusLabel}</span>
         </div>
-        <div className="flex items-center justify-between text-[11px]">
-          <span className="text-steel-500">
-            Best day {formatCurrencyShort(consistency.maxDayProfit)} · Total{' '}
-            {formatCurrencyShort(consistency.totalProfit)}
-          </span>
-          <span className={`stat-value ${statusColor}`}>
-            {consistency.maxDayPercent > 0 ? `${consistency.maxDayPercent.toFixed(1)}%` : '—'} / {consistency.limit}%
+        <div className="flex justify-between">
+          <span>Cycle End Date</span>
+          <span className="text-slate-400">
+            {Array.isArray(referencePeriod.cycleEndDate) ? referencePeriod.cycleEndDate[0] : referencePeriod.cycleEndDate}
           </span>
         </div>
-      </div>
-
-      {/* Reference period */}
-      <div className="flex items-center justify-between text-[11px] pt-3 border-t border-ink-700/40">
-        <span className="text-steel-400 uppercase tracking-wider">
-          Reference Period <span className="text-steel-500 normal-case">(cycle {referencePeriod.cycleNumber})</span>
-        </span>
-        <span className="stat-value text-steel-300">
-          {referencePeriod.daysRemaining}d left · ends {referencePeriod.cycleEndDate}
-        </span>
-      </div>
-
-      {/* First withdrawal eligibility */}
-      <div className="flex items-center justify-between text-[11px]">
-        <span className="text-steel-400 uppercase tracking-wider">First Withdrawal</span>
-        {firstWithdrawal.firstTradeDate === null ? (
-          <span className="stat-value text-steel-500">No trades logged yet</span>
-        ) : firstWithdrawal.eligible ? (
-          <span className="stat-value text-bull-400">Eligible since {firstWithdrawal.eligibleDate}</span>
-        ) : (
-          <span className="stat-value text-steel-300">
-            {firstWithdrawal.daysRemaining}d left · eligible {firstWithdrawal.eligibleDate}
+        <div className="flex justify-between">
+          <span>Payout Window Status</span>
+          <span className="text-slate-400">
+            {firstWithdrawal.eligible ? 'Unlocked' : `Locked (${firstWithdrawal.daysRemaining} days left)`}
           </span>
-        )}
-      </div>
-
-      {/* Today's session */}
-      <div className="pt-3 border-t border-ink-700/40">
-        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1.5">Today</p>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <p className="stat-value text-sm font-semibold text-slate-200">{todayTrades.length}</p>
-            <p className="text-[10px] text-steel-500">trades</p>
-          </div>
-          <div>
-            <p className="stat-value text-sm font-semibold text-slate-200">
-              {todayTrades.length > 0 ? `${todayWinRate.toFixed(0)}%` : '—'}
-            </p>
-            <p className="text-[10px] text-steel-500">win rate</p>
-          </div>
-          <div>
-            <p className={`stat-value text-sm font-semibold ${todayProfit >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
-              {todayTrades.length > 0 ? formatCurrency(todayProfit) : '—'}
-            </p>
-            <p className="text-[10px] text-steel-500">P&amp;L</p>
-          </div>
         </div>
-      </div>
-
-      {/* Projections — derived from this account's own real net average, not a fixed hypothetical */}
-      <div className="pt-3 border-t border-ink-700/40">
-        <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-1.5">
-          Projected Net Payout <span className="text-steel-500 normal-case">(at current average)</span>
-        </p>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-lg bg-ink-900/50 p-2.5 text-center">
-            <p className="stat-value text-sm font-semibold text-accent-400">{formatCurrency(projected5Day)}</p>
-            <p className="text-[10px] text-steel-500">5 trading days</p>
-          </div>
-          <div className="rounded-lg bg-ink-900/50 p-2.5 text-center">
-            <p className="stat-value text-sm font-semibold text-accent-400">{formatCurrency(projected20Day)}</p>
-            <p className="text-[10px] text-steel-500">20 trading days</p>
-          </div>
+        <div className="flex justify-between pt-1.5">
+          <span>Projected Payout (5 Days)</span>
+          <span className="text-slate-300 font-medium">{formatCurrencyShort(projected5Day)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Projected Payout (20 Days)</span>
+          <span className="text-slate-300 font-medium">{formatCurrencyShort(projected20Day)}</span>
+        </div>
+        <div className="flex justify-between pt-1.5 border-t border-ink-700/40 text-steel-400">
+          <span>Today's Session P&amp;L</span>
+          <span className={`font-semibold ${todayProfit >= 0 ? 'text-bull-400' : 'text-bear-400'}`}>
+            {todayProfit >= 0 ? '+' : ''}{formatCurrency(todayProfit)} ({todayWinRate.toFixed(0)}% WR)
+          </span>
         </div>
       </div>
     </div>
