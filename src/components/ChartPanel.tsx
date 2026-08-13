@@ -9,19 +9,12 @@ import {
 } from 'lightweight-charts';
 import { Loader2, LineChart } from 'lucide-react';
 import { Panel } from '@/components/ui';
+import { fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 
 // This chart is hardcoded to a single pair — no selector.
 const PAIR = 'GBPAUD';
 const PAIR_LABEL = 'GBP/AUD';
 const TWELVEDATA_SYMBOL = 'GBP/AUD';
-
-type Candle = {
-  time: UTCTimestamp;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-};
 
 // ---------------------------------------------------------------------------
 // Heikin Ashi conversion
@@ -90,7 +83,7 @@ function generateSampleCandles(count = 100): Candle[] {
   const candles: Candle[] = [];
 
   for (let i = 0; i < count; i++) {
-    const time = (startTime + i * hourInSeconds) as UTCTimestamp;
+    const time = startTime + i * hourInSeconds;
     const open = price;
     const drift = (random() - 0.5) * volatility;
     const close = Math.max(open + drift, open * 0.5);
@@ -104,68 +97,15 @@ function generateSampleCandles(count = 100): Candle[] {
 }
 
 // ---------------------------------------------------------------------------
-// Twelve Data — real OHLC fetch
-// ---------------------------------------------------------------------------
 
-const TWELVEDATA_URL = 'https://api.twelvedata.com/time_series';
-
-type TwelveDataValue = {
-  datetime: string;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-};
-
-type TwelveDataResponse =
-  | { status: 'ok'; values: TwelveDataValue[] }
-  | { status: 'error'; code?: number; message?: string };
-
-async function fetchOHLC(): Promise<Candle[]> {
-  const apiKey = import.meta.env.VITE_TWELVEDATA_KEY;
-  if (!apiKey) {
-    throw new Error('VITE_TWELVEDATA_KEY is not set');
-  }
-
-  const params = new URLSearchParams({
-    symbol: TWELVEDATA_SYMBOL,
-    interval: '1h',
-    outputsize: '100',
-    timezone: 'UTC',
-    apikey: apiKey,
-  });
-
-  const response = await fetch(`${TWELVEDATA_URL}?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Twelve Data request failed with status ${response.status}`);
-  }
-
-  const data = (await response.json()) as TwelveDataResponse;
-  if (data.status !== 'ok' || !Array.isArray(data.values) || data.values.length === 0) {
-    throw new Error(data.status === 'error' ? data.message ?? 'Twelve Data error' : 'No data returned');
-  }
-
-  // Twelve Data returns most-recent-first; ascending order is needed both
-  // for the chart and for the Heikin Ashi running calculation.
-  const candles = data.values
-    .map((v): Candle => ({
-      time: Math.floor(new Date(`${v.datetime.replace(' ', 'T')}Z`).getTime() / 1000) as UTCTimestamp,
-      open: parseFloat(v.open),
-      high: parseFloat(v.high),
-      low: parseFloat(v.low),
-      close: parseFloat(v.close),
-    }))
-    .filter((c) => Number.isFinite(c.time) && Number.isFinite(c.close))
-    .sort((a, b) => a.time - b.time);
-
-  if (candles.length === 0) {
-    throw new Error('Twelve Data returned no parseable candles');
-  }
-
-  return candles;
+/**
+ * lightweight-charts requires its own branded UTCTimestamp type. The
+ * shared Candle type (used across chart + signal code) just uses plain
+ * numbers, so this cast only happens right at the chart library boundary.
+ */
+function toChartData(candles: Candle[]) {
+  return candles.map((c) => ({ ...c, time: c.time as UTCTimestamp }));
 }
-
-// ---------------------------------------------------------------------------
 
 export function ChartPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -227,16 +167,16 @@ export function ChartPanel() {
     let cancelled = false;
     setLoading(true);
 
-    fetchOHLC()
+    fetchTwelveDataCandles(TWELVEDATA_SYMBOL, '1h', 100)
       .then((candles) => {
         if (cancelled) return;
-        seriesRef.current?.setData(toHeikinAshi(candles));
+        seriesRef.current?.setData(toChartData(toHeikinAshi(candles)));
         chartRef.current?.timeScale().fitContent();
         setUsingSampleData(false);
       })
       .catch(() => {
         if (cancelled) return;
-        seriesRef.current?.setData(toHeikinAshi(generateSampleCandles()));
+        seriesRef.current?.setData(toChartData(toHeikinAshi(generateSampleCandles())));
         chartRef.current?.timeScale().fitContent();
         setUsingSampleData(true);
       })
