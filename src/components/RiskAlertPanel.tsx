@@ -1,13 +1,17 @@
-import { useMemo } from 'react';
-import { AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Square } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertOctagon, AlertTriangle, Clock3, Newspaper, ShieldAlert, ShieldCheck, Square } from 'lucide-react';
 import { Panel, StatusDot } from '@/components/ui';
 import {
   checkConsistency,
+  currentFloorBalance,
   drawdownBufferRemaining,
   drawdownPct,
   formatCurrency,
+  holdSeconds,
+  isProhibitedHoldTime,
   riskStatus,
 } from '@/lib/trading';
+import { fetchUpcomingHighImpactNews, type NewsCalendarResult } from '@/lib/newsCalendar';
 import type { Account, Trade } from '@/types';
 
 export function RiskAlertPanel({
@@ -32,10 +36,39 @@ export function RiskAlertPanel({
     [accounts, trades],
   );
 
+  // Trades under the prohibited hold-time threshold. Only trades with
+  // known open/close timestamps can be evaluated (CSV imports) — trades
+  // where hold time is unknown are never flagged, since "unknown" must
+  // not be treated as "prohibited."
+  const flaggedTrades = useMemo(
+    () =>
+      trades
+        .map((t) => ({ trade: t, prohibited: isProhibitedHoldTime(t), seconds: holdSeconds(t) }))
+        .filter((x) => x.prohibited === true),
+    [trades],
+  );
+
+  const [newsResult, setNewsResult] = useState<NewsCalendarResult>({ status: 'unconfigured' });
+  const [newsLoading, setNewsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchUpcomingHighImpactNews().then((result) => {
+      if (!cancelled) {
+        setNewsResult(result);
+        setNewsLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const stopCount = alerts.filter((a) => a.status === 'red').length;
   const cautionCount = alerts.filter((a) => a.status === 'yellow').length;
   const consistencyBreachCount = consistencyChecks.filter((c) => c.breached).length;
-  const allClear = stopCount === 0 && cautionCount === 0 && consistencyBreachCount === 0;
+  const allClear =
+    stopCount === 0 && cautionCount === 0 && consistencyBreachCount === 0 && flaggedTrades.length === 0;
 
   return (
     <Panel
@@ -54,7 +87,7 @@ export function RiskAlertPanel({
         >
           <StatusDot
             status={
-              stopCount > 0 || consistencyBreachCount > 0
+              stopCount > 0 || consistencyBreachCount > 0 || flaggedTrades.length > 0
                 ? 'red'
                 : cautionCount > 0
                   ? 'yellow'
@@ -62,7 +95,9 @@ export function RiskAlertPanel({
             }
             pulse
           />
-          {allClear ? 'ALL CLEAR' : `${stopCount + cautionCount + consistencyBreachCount} ACTIVE`}
+          {allClear
+            ? 'ALL CLEAR'
+            : `${stopCount + cautionCount + consistencyBreachCount + flaggedTrades.length} ACTIVE`}
         </div>
       }
     >
@@ -155,9 +190,9 @@ export function RiskAlertPanel({
                   }`}
                 >
                   {isRed &&
-                    `STOP. Drawdown floor of ${formatCurrency(account.floorBalance)} reached. Halt all trading on this account immediately.`}
+                    `STOP. Drawdown floor of ${formatCurrency(currentFloorBalance(account))} reached. Halt all trading on this account immediately.`}
                   {isYellow &&
-                    `CAUTION. ${ddPct.toFixed(0)}% of the drawdown buffer consumed. Only ${formatCurrency(remaining)} remains above the floor of ${formatCurrency(account.floorBalance)}.`}
+                    `CAUTION. ${ddPct.toFixed(0)}% of the drawdown buffer consumed. Only ${formatCurrency(remaining)} remains above the floor of ${formatCurrency(currentFloorBalance(account))}.`}
                   {isGreen &&
                     `Within normal risk. ${formatCurrency(remaining)} of buffer remaining above the floor.`}
                 </p>
@@ -203,6 +238,88 @@ export function RiskAlertPanel({
             </div>
           </div>
         )}
+
+        {/* Prohibited strategy — sub-60s hold time */}
+        {flaggedTrades.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Clock3 className="h-3.5 w-3.5 text-bear-400" />
+              Prohibited Strategy — Sub-60s Hold Time
+            </h3>
+            <div className="rounded-lg border border-bear-500/40 bg-bear-500/10 p-3.5 space-y-2">
+              <p className="text-xs text-bear-300 leading-relaxed">
+                {flaggedTrades.length} trade{flaggedTrades.length === 1 ? '' : 's'} held under 60 seconds —
+                flag for review against the firm's scalping/strategy rules.
+              </p>
+              <div className="space-y-1.5">
+                {flaggedTrades.map(({ trade, seconds }) => (
+                  <div
+                    key={trade.id}
+                    className="flex items-center justify-between text-[11px] rounded bg-ink-900/40 px-2.5 py-1.5"
+                  >
+                    <span className="text-slate-300">
+                      {trade.account_name} · {trade.pair} · {trade.trade_date}
+                    </span>
+                    <span className="stat-value text-bear-400">{seconds?.toFixed(0)}s hold</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-steel-500">
+                Only trades with logged open/close timestamps (CSV imports) can be checked — manually
+                logged trades have no time-of-day data and aren't included here.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* News event calendar warning */}
+        <div className="space-y-3">
+          <h3 className="text-xs font-semibold text-steel-400 uppercase tracking-wider flex items-center gap-1.5">
+            <Newspaper className="h-3.5 w-3.5 text-steel-400" />
+            Upcoming High-Impact News (GBP / AUD)
+          </h3>
+          <div className="rounded-lg border border-ink-600/40 bg-ink-900/40 p-3.5">
+            {newsLoading ? (
+              <p className="text-xs text-steel-400">Checking economic calendar…</p>
+            ) : newsResult.status === 'unconfigured' ? (
+              <p className="text-xs text-steel-400">
+                No news calendar source configured — set{' '}
+                <code className="text-[11px] text-steel-300">VITE_FINNHUB_API_KEY</code> to enable this
+                warning.
+              </p>
+            ) : newsResult.status === 'error' ? (
+              <p className="text-xs text-warn-300">
+                Couldn't load the economic calendar ({newsResult.message}). Check manually before trading
+                — this is not a confirmation that no news is scheduled.
+              </p>
+            ) : newsResult.events.length === 0 ? (
+              <p className="text-xs text-bull-300">
+                No high-impact GBP/AUD events in the next 48 hours, per the last check.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {newsResult.events.map((e, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between text-[11px] rounded bg-warn-500/10 border border-warn-500/20 px-2.5 py-1.5"
+                  >
+                    <span className="text-warn-300">
+                      {e.currency} · {e.event}
+                    </span>
+                    <span className="stat-value text-warn-400">
+                      {new Date(e.time).toLocaleString(undefined, {
+                        month: 'short',
+                        day: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </Panel>
   );
