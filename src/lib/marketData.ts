@@ -14,10 +14,11 @@ export async function fetchTwelveDataCandles(
  interval: string,
  count: number,
 ): Promise<Candle> {
+ if (!TWELVE_DATA_KEY) return;
  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${interval}&outputsize=${count}&apikey=${TWELVE_DATA_KEY}&format=JSON`;
  const res = await fetch(url);
  const data = await res.json();
- if (!data.values) throw new Error(`No candle data returned for ${symbol}`);
+ if (!data.values) return;
  return data.values.map((v: Record<string, string>) => ({
  time: new Date(v.datetime).getTime(),
  open: parseFloat(v.open),
@@ -36,6 +37,7 @@ export async function fetchCandles(
 }
 
 export async function getLivePrice(symbol: string): Promise<number | null> {
+ if (!TWELVE_DATA_KEY) return null;
  const url = `https://api.twelvedata.com/price?symbol=${symbol}&apikey=${TWELVE_DATA_KEY}`;
  const res = await fetch(url);
  const data = await res.json();
