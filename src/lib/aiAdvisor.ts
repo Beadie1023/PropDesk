@@ -67,7 +67,28 @@ export async function analyzeMarket(
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
+    // Read as text first — an empty or non-JSON body (e.g. the backend
+    // waking up from a Render free-tier sleep, or a proxy timeout page)
+    // should give a clear diagnostic, not a raw "Unexpected end of JSON
+    // input" parse error with no context.
+    const rawText = await res.text();
+    if (!rawText) {
+      return {
+        status: 'error',
+        message: `Backend returned an empty response (status ${res.status}). If the backend has been idle, it may be waking up — try again in ~30 seconds.`,
+      };
+    }
+
+    let data: { message?: string; analysis?: string };
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      return {
+        status: 'error',
+        message: `Backend returned a non-JSON response (status ${res.status}): ${rawText.slice(0, 150)}`,
+      };
+    }
+
     if (!res.ok) {
       return { status: 'error', message: data.message ?? `Analysis request failed with status ${res.status}` };
     }
