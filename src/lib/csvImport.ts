@@ -20,6 +20,8 @@ const HEADER_ALIASES: Record<string, string[]> = {
   profit: ['profit', 'profit/loss', 'p/l', 'pnl', 'net profit'],
   openTime: ['open time', 'time open'],
   closeTime: ['close time', 'time close'],
+  commission: ['commission'],
+  swap: ['swap'],
 };
 
 const NON_TRADE_TYPES = ['balance', 'deposit', 'withdrawal', 'credit', 'correction'];
@@ -78,6 +80,8 @@ function buildColumnMap(headerRow: string[]): Partial<Record<keyof typeof HEADER
   set('type', HEADER_ALIASES.type);
   set('volume', HEADER_ALIASES.volume);
   set('profit', HEADER_ALIASES.profit);
+  set('commission', HEADER_ALIASES.commission);
+  set('swap', HEADER_ALIASES.swap);
 
   // Prefer explicit "open X" / "close X" headers when present.
   set('openPrice', ['open price', 'price open', 'entry price']);
@@ -116,6 +120,30 @@ function normalizeDate(raw: string | undefined): string | null {
   const parsed = new Date(cleaned);
   if (!Number.isNaN(parsed.getTime())) {
     return parsed.toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+/**
+ * Like normalizeDate but keeps time-of-day, needed to compute hold
+ * duration for the prohibited-strategy (sub-60s hold) check. Returns an
+ * ISO datetime string, or null if unparseable.
+ */
+function normalizeDateTime(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.trim();
+
+  // MT5's usual format: "2026.08.01 14:32:10" — normalize dots to dashes
+  // in the date portion so Date can parse it reliably.
+  const match = cleaned.match(/(\d{4})[.\-/](\d{2})[.\-/](\d{2})[ T](\d{2}):(\d{2})(:(\d{2}))?/);
+  if (match) {
+    const [, y, m, d, hh, mm, , ss] = match;
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss ?? '00'}Z`;
+  }
+
+  const parsed = new Date(cleaned);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString();
   }
   return null;
 }
@@ -179,13 +207,13 @@ export function parseMT5Csv(text: string): ParsedImportResult {
     const openPrice = colMap.openPrice !== undefined ? parseNumericCell(cells[colMap.openPrice]) : NaN;
     const closePrice = colMap.closePrice !== undefined ? parseNumericCell(cells[colMap.closePrice]) : NaN;
     const volume = colMap.volume !== undefined ? parseNumericCell(cells[colMap.volume]) : NaN;
+    const commission = colMap.commission !== undefined ? parseNumericCell(cells[colMap.commission]) : NaN;
+    const swap = colMap.swap !== undefined ? parseNumericCell(cells[colMap.swap]) : NaN;
 
-    const dateRaw =
-      colMap.closeTime !== undefined
-        ? cells[colMap.closeTime]
-        : colMap.openTime !== undefined
-          ? cells[colMap.openTime]
-          : undefined;
+    const openTimeRaw = colMap.openTime !== undefined ? cells[colMap.openTime] : undefined;
+    const closeTimeRaw = colMap.closeTime !== undefined ? cells[colMap.closeTime] : undefined;
+
+    const dateRaw = closeTimeRaw ?? openTimeRaw;
     const tradeDate = normalizeDate(dateRaw);
 
     if (!tradeDate) {
@@ -213,6 +241,10 @@ export function parseMT5Csv(text: string): ParsedImportResult {
       close_price: Number.isFinite(closePrice) ? closePrice : undefined,
       lots: Number.isFinite(volume) ? volume : undefined,
       source: 'mt5_import',
+      commission: Number.isFinite(commission) ? commission : undefined,
+      swap: Number.isFinite(swap) ? swap : undefined,
+      open_time: normalizeDateTime(openTimeRaw) ?? undefined,
+      close_time: normalizeDateTime(closeTimeRaw) ?? undefined,
     });
   }
 
