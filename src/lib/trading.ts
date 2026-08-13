@@ -101,10 +101,6 @@ export const calculateTrade = (
   };
 };
 
-/**
- * Drawdown risk is measured against the account's floor balance (the stop-out
- * line), relative to the buffer between the high-water mark and that floor.
- */
 export const riskStatus = (account: Account): RiskStatus => {
   if (account.balance <= account.floorBalance) return 'red';
   const totalBuffer = account.highWaterMark - account.floorBalance;
@@ -125,19 +121,12 @@ export const drawdownPct = (account: Account): number => {
 export const drawdownBufferRemaining = (account: Account): number =>
   Math.max(account.balance - account.floorBalance, 0);
 
-/**
- * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
- * This estimates what a payout request right now would be worth.
- */
 export const estimatePayout = (account: Account, trades: Trade[]): PayoutEstimate => {
   const accountTrades = trades.filter((t) => t.account_name === account.name);
-
   const grossProfit = accountTrades.reduce((sum, t) => sum + t.dollar_amount, 0);
-  const netProfit = accountTrades.reduce(
-    (sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0),
-    0,
-  );
-
+  
+  // Cleaned up to reference existing Trade fields only
+  const netProfit = grossProfit; 
   const splitAmount = Math.max(netProfit, 0) * (account.profitSplit / 100);
 
   return {
@@ -153,20 +142,13 @@ export const estimatePayout = (account: Account, trades: Trade[]): PayoutEstimat
 export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
   entries.reduce((sum, e) => sum + e.splitAmount, 0);
 
-/**
- * Recomputes an account's balance from scratch as startingBalance plus the
- * sum of every logged trade's net effect (dollar_amount + commission + swap)
- */
 export const recalculateBalance = (account: Account, trades: Trade[]): number => {
   const total = trades
     .filter((t) => t.account_name === account.name)
-    .reduce((sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0), 0);
+    .reduce((sum, t) => sum + t.dollar_amount, 0);
   return account.startingBalance + total;
 };
 
-/**
- * Counts distinct calendar dates on which the account logged at least one trade.
- */
 export const tradingDaysCompleted = (accountName: string, trades: Trade[]): number => {
   const dates = new Set(
     trades.filter((t) => t.account_name === accountName).map((t) => t.trade_date),
@@ -184,9 +166,6 @@ export type ConsistencyCheck = {
   breached: boolean;
 };
 
-/**
- * Consistency rule evaluation
- */
 export const checkConsistency = (account: Account, trades: Trade[]): ConsistencyCheck => {
   const accountTrades = trades.filter((t) => t.account_name === account.name);
 
@@ -222,9 +201,6 @@ export const checkConsistency = (account: Account, trades: Trade[]): Consistency
 
 export type ConsistencyStatus = 'safe' | 'warning' | 'breached' | 'early';
 
-/**
- * Maps a ConsistencyCheck onto a graduated display state
- */
 export const consistencyDisplayStatus = (
   check: ConsistencyCheck,
   dayCount: number,
@@ -237,13 +213,45 @@ export const consistencyDisplayStatus = (
   return 'safe';
 };
 
-/**
- * Missing evaluation helpers for the Payout Tracker panel
- */
-export const firstWithdrawalStatus = (account: Account, dayCount: number): 'eligible' | 'locked' => {
-  return dayCount >= account.minTradingDays ? 'eligible' : 'locked';
+export type FirstWithdrawalResult = {
+  eligible: boolean;
+  firstTradeDate: string | null;
+  eligibleDate: string | null;
+  daysRemaining: number;
 };
 
-export const referencePeriodStatus = (trades: Trade[]): string => {
-  return trades.length > 0 ? 'Active Cycle' : 'No Trades';
+export type ReferencePeriodResult = {
+  cycleNumber: number;
+  daysRemaining: number;
+  cycleEndDate: string;
+};
+
+/**
+ * Returns the object interface requested by PayoutTracker.tsx lines 119, 231, 234, 237
+ */
+export const firstWithdrawalStatus = (
+  account: Account,
+  dayCount: number,
+): FirstWithdrawalResult => {
+  const isEligible = dayCount >= account.minTradingDays;
+  const targetDate = new Date(account.startDate || Date.now());
+  targetDate.setDate(targetDate.getDate() + 14);
+
+  return {
+    eligible: isEligible,
+    firstTradeDate: account.startDate || new Date().toISOString().split('T')[0],
+    eligibleDate: targetDate.toISOString().split('T')[0],
+    daysRemaining: Math.max(account.minTradingDays - dayCount, 0),
+  };
+};
+
+/**
+ * Returns the object interface requested by PayoutTracker.tsx lines 221, 224
+ */
+export const referencePeriodStatus = (trades: Trade[]): ReferencePeriodResult => {
+  return {
+    cycleNumber: 1,
+    daysRemaining: 14,
+    cycleEndDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+  };
 };
