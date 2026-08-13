@@ -4,6 +4,7 @@ import { Panel, StatusBadge } from '@/components/ui';
 import {
   checkConsistency,
   consistencyDisplayStatus,
+  currentFloorBalance,
   drawdownBufferRemaining,
   drawdownPct,
   formatCurrency,
@@ -221,7 +222,7 @@ function AccountCard({ account, trades }: { account: Account; trades: Trade[] })
         </div>
         <div className="flex items-center justify-between mt-2 text-[11px]">
           <span className="text-steel-500">
-            Floor {formatCurrencyShort(account.floorBalance)} · Max DD {account.maxDrawdownPercent}%
+            Floor {formatCurrencyShort(currentFloorBalance(account))} · Max DD {account.maxDrawdownPercent}%
           </span>
           <span
             className={`stat-value ${
