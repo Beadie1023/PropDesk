@@ -3,10 +3,55 @@ import crypto from 'node:crypto';
 import express from 'express';
 import cors from 'cors';
 import { connectAccount, getAccountInfo, placeOrder, isConnected } from './metaapiClient.js';
+import { analyzeMarket } from './aiAdvisor.js';
 
 const app = express();
+
+// Needed to get the real client IP (not the proxy's) when this server runs
+// behind a reverse proxy — which is the case on Render and most PaaS hosts.
+// Without this, req.ip would always report the proxy's address and IP
+// allowlisting below would either block everyone or allow everyone.
+app.set('trust proxy', true);
+
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || '*' }));
 app.use(express.json());
+
+// Strips the "::ffff:" prefix Node sometimes adds to IPv4 addresses on
+// dual-stack sockets (e.g. "::ffff:127.0.0.1" -> "127.0.0.1") so it
+// compares equal to a plain IPv4 entry in ALLOWED_IPS.
+function normalizeIp(ip) {
+  return typeof ip === 'string' && ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+}
+
+// First line of defense: reject requests from any IP not explicitly
+// allowlisted, before the API key is even checked. Fails closed — if
+// ALLOWED_IPS isn't set, every request is rejected rather than allowed
+// through unfiltered.
+function requireAllowedIP(req, res, next) {
+  const raw = process.env.ALLOWED_IPS;
+
+  if (!raw) {
+    console.error('ALLOWED_IPS is not set in the server environment — refusing all requests.');
+    res.status(403).json({ message: 'Forbidden' });
+    return;
+  }
+
+  const allowedIps = raw
+    .split(',')
+    .map((ip) => ip.trim())
+    .filter(Boolean);
+
+  const clientIp = normalizeIp(req.ip);
+
+  if (!allowedIps.includes(clientIp)) {
+    res.status(403).json({ message: 'Forbidden' });
+    return;
+  }
+
+  next();
+}
+
+app.use(requireAllowedIP);
 
 // Every request must present the correct x-api-key header. Uses a
 // timing-safe comparison so response time can't leak how many characters
@@ -92,6 +137,17 @@ app.post('/api/metaapi/place-order', async (req, res) => {
     res.json({ orderId: result.orderId ?? result.positionId ?? null, raw: result });
   } catch (err) {
     res.status(502).json({ message: err instanceof Error ? err.message : 'Order failed' });
+  }
+});
+
+app.post('/api/ai/analyze', async (req, res) => {
+  const payload = req.body || {};
+
+  try {
+    const analysis = await analyzeMarket(payload);
+    res.json({ analysis });
+  } catch (err) {
+    res.status(502).json({ message: err instanceof Error ? err.message : 'Analysis failed' });
   }
 });
 
