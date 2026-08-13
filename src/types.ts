@@ -35,6 +35,7 @@ export type Trade = {
   close_price?: number;
   lots?: number;
   source?: 'manual' | 'mt5_import';
+  // Note: commission and swap are removed from here as they do not exist in your MT5 logs
 };
 
 export type RiskStatus = 'green' | 'yellow' | 'red';
@@ -45,6 +46,7 @@ export type PayoutEstimate = {
   accountId: string;
   accountName: string;
   grossProfit: number;
+  netProfit: number; // Added to avoid TS2353 object literal restrictions
   splitAmount: number;
   eligible: boolean;
 };
