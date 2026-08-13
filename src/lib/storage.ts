@@ -7,7 +7,7 @@ const SEED_FLAG_KEY = 'propdesk:seeded';
 // Bump this whenever the Account/Trade shape changes. Anyone with older
 // cached localStorage data (e.g. from before the drawdown-model rewrite)
 // gets reseeded automatically instead of crashing on missing fields.
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 
 const SEED_ACCOUNTS: Account[] = [
   {
@@ -15,9 +15,14 @@ const SEED_ACCOUNTS: Account[] = [
     name: 'Ember',
     firm: 'Upcomers',
     type: 'Instant Funded',
-    balance: 2000,
+    // Matches the real Upcomers dashboard snapshot (2026-08-13): current
+    // balance $2,002.44, high-water mark $2,002.44. Starting balance and
+    // floorBalance stay as the account's original seed values — the real
+    // stop-out floor is now computed live via currentFloorBalance() in
+    // trading.ts, which tracks the high-water mark as it moves.
+    balance: 2002.44,
     startingBalance: 2000,
-    highWaterMark: 2000,
+    highWaterMark: 2002.44,
     floorBalance: 1920,
     maxDrawdownPercent: 4,
     profitSplit: 80,
@@ -31,7 +36,56 @@ const SEED_ACCOUNTS: Account[] = [
   },
 ];
 
-const SEED_TRADES: Trade[] = [];
+// Real trades from MT5 history (added manually — no CSV export available
+// at the time). Verified: net profit ($1.06 + $1.38 = $2.44) matches the
+// real account's Current Profit exactly, and the consistency % this
+// produces (56.56%) matches Upcomers' own dashboard exactly.
+const SEED_TRADES: Trade[] = [
+  {
+    id: 'ember-real-1',
+    trade_date: '2026-08-06',
+    pair: 'GBPAUD',
+    direction: 'long',
+    rr_used: '',
+    entry_price: 1.91197,
+    sl: 1.91055,
+    tp1: 1.91355,
+    tp2: 1.91355,
+    close_price: 1.91355,
+    lots: 0.01,
+    result: 'win',
+    dollar_amount: 1.11,
+    commission: -0.05,
+    swap: 0,
+    open_time: '2026-08-06T13:08:22Z',
+    close_time: '2026-08-06T14:49:48Z',
+    notes: 'Real trade — added manually from MT5 history (no CSV export available)',
+    account_name: 'Ember',
+    source: 'manual',
+  },
+  {
+    id: 'ember-real-2',
+    trade_date: '2026-08-13',
+    pair: 'GBPAUD',
+    direction: 'long',
+    rr_used: '',
+    entry_price: 1.91230,
+    sl: 1.91032,
+    tp1: 1.91432,
+    tp2: 1.91432,
+    close_price: 1.91432,
+    lots: 0.01,
+    result: 'win',
+    dollar_amount: 1.43,
+    commission: -0.05,
+    swap: 0,
+    open_time: '2026-08-13T03:21:26Z',
+    close_time: '2026-08-13T06:22:41Z',
+    notes: 'Real trade — added manually from MT5 history (no CSV export available)',
+    account_name: 'Ember',
+    source: 'manual',
+  },
+];
 
 export const genId = (): string =>
   `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
