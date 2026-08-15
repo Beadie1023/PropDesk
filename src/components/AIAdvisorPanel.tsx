@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, Bot, Loader2, Sparkles } from 'lucide-react';
 import { Panel } from '@/components/ui';
-import { fetchTwelveDataCandles } from '@/lib/marketData';
+import { fetchCandlesSequential, fetchTwelveDataCandles } from '@/lib/marketData';
 import { CURRENCY_STRENGTH_PAIRS, computeCurrencyStrength, computeLorentzianSignal } from '@/lib/signals';
 import { analyzeMarket, type AIAnalysisResult } from '@/lib/aiAdvisor';
 import type { Candle } from '@/lib/marketData';
@@ -21,10 +21,14 @@ export function AIAdvisorPanel() {
     setState({ status: 'loading' });
 
     try {
-      const [gbpaud, ...basket] = await Promise.all([
-        fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150),
-        ...CURRENCY_STRENGTH_PAIRS.map((symbol) => fetchTwelveDataCandles(symbol, '1h', 40)),
-      ]);
+      // Both GBP/AUD and the basket are very likely already cached from
+      // SignalPanel/ChartPanel having fetched the same symbols recently —
+      // this only hits the network for what isn't, staggered rather than
+      // bursted for whatever is a genuine cache miss.
+      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+      const basket = await fetchCandlesSequential(
+        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+      );
 
       const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
       CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
