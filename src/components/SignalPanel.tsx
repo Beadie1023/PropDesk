@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { Panel } from '@/components/ui';
-import { fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
+import { fetchCandlesSequential, fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 import {
   CURRENCY_STRENGTH_PAIRS,
   combineSignals,
@@ -59,10 +59,15 @@ export function SignalPanel() {
     setState({ status: 'loading' });
 
     try {
-      const [gbpaud, ...basket] = await Promise.all([
-        fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150),
-        ...CURRENCY_STRENGTH_PAIRS.map((symbol) => fetchTwelveDataCandles(symbol, '1h', 40)),
-      ]);
+      // GBP/AUD first — ChartPanel likely already fetched this exact
+      // symbol/interval/outputsize, so this is often a cache hit. The
+      // basket (genuinely distinct symbols, can't be cached away) is
+      // fetched with a small stagger instead of all at once, to avoid
+      // bursting the free-tier rate limit.
+      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+      const basket = await fetchCandlesSequential(
+        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+      );
 
       const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
       CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
