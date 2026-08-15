@@ -167,7 +167,7 @@ export function ChartPanel() {
     let cancelled = false;
     setLoading(true);
 
-    fetchTwelveDataCandles(TWELVEDATA_SYMBOL, '1h', 100)
+    fetchTwelveDataCandles(TWELVEDATA_SYMBOL, '1h', 150)
       .then((candles) => {
         if (cancelled) return;
         seriesRef.current?.setData(toChartData(toHeikinAshi(candles)));
