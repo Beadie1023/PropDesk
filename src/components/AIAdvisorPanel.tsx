@@ -39,11 +39,11 @@ const LORENTZIAN_KERNEL = [
  { label: 'Kernel Smoothing Lag', value: '2' },
 ];
 
-export function AIAdvisorPanel {
+export function AIAdvisorPanel() {
  const [state, setState] = useState<PanelState>({ status: 'idle' });
  const [showConfig, setShowConfig] = useState(false);
 
- const runAnalysis = async => {
+ const runAnalysis = async () => {
  setState({ status: 'loading' });
  try {
  const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
@@ -61,7 +61,7 @@ export function AIAdvisorPanel {
  const result: AIAnalysisResult = await analyzeMarket(gbpaud, lorentzian, currencyStrength);
 
  if (result.status === 'ok') {
- setState({ status: 'ok', analysis: result.analysis, computedAt: new Date });
+ setState({ status: 'ok', analysis: result.analysis, computedAt: new Date() });
  } else {
  setState({ status: 'error', message: result.message });
  }
@@ -81,7 +81,7 @@ export function AIAdvisorPanel {
  action={
  <div className="flex items-center gap-2">
  <button
- onClick={ => setShowConfig((v) => !v)}
+ onClick={() => setShowConfig((v) => !v)}
  className="btn-ghost flex items-center gap-1.5 text-xs text-steel-400 hover:text-steel-200"
  >
  <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -110,18 +110,18 @@ export function AIAdvisorPanel {
  <p className="text-[11px] text-steel-400 leading-relaxed">
  This is an AI reading recent price data - not a professional trader, not financial
  advice, and it has no verified track record. It never suggests a specific trade to
- place. This doesn't run automatically; each analysis is a real API request you trigger.
+ place. This does not run automatically; each analysis is a real API request you trigger.
  </p>
  </div>
 
- {/* Lorentzian Config Panel */}
+ {/* Lorentzian Config Card */}
  {showConfig && (
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-4">
  <p className="text-xs font-semibold text-steel-300 uppercase tracking-wide">
  Lorentzian Classification v2.0 - GBP/AUD 30m
  </p>
 
- {/* Features */}
+ {/* Features Table */}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Features</p>
  <table className="w-full text-xs text-steel-300">
@@ -159,7 +159,7 @@ export function AIAdvisorPanel {
  </div>
  </div>
 
- {/* Kernel */}
+ {/* Kernel Settings */}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Kernel Settings</p>
  <div className="space-y-1.5">
@@ -178,7 +178,7 @@ export function AIAdvisorPanel {
  </div>
  )}
 
- {/* Analysis States */}
+ {/* Idle State */}
  {state.status === 'idle' && (
  <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
  <Bot className="h-8 w-8 text-steel-600" />
@@ -188,6 +188,7 @@ export function AIAdvisorPanel {
  </div>
  )}
 
+ {/* Loading State */}
  {state.status === 'loading' && (
  <div className="flex items-center justify-center gap-2 py-10 text-sm text-steel-400">
  <Loader2 className="h-4 w-4 animate-spin" />
@@ -195,6 +196,7 @@ export function AIAdvisorPanel {
  </div>
  )}
 
+ {/* Error State */}
  {state.status === 'error' && (
  <div className="rounded-lg border border-bear-500/30 bg-bear-500/10 p-4">
  <p className="text-sm text-bear-300">
@@ -203,13 +205,14 @@ export function AIAdvisorPanel {
  </div>
  )}
 
+ {/* Success State */}
  {state.status === 'ok' && (
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4">
  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
  {state.analysis}
  </p>
  <p className="text-[11px] text-steel-500 mt-3 pt-3 border-t border-ink-700/40">
- Generated {state.computedAt.toLocaleTimeString}
+ Generated {state.computedAt.toLocaleTimeString()}
  </p>
  </div>
  )}
