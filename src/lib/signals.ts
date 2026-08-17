@@ -150,6 +150,19 @@ export type CurrencyStrengthResult = {
 const STRENGTH_LOOKBACK_BARS = 24; // ~1 day of hourly bars
 const STRENGTH_DIFFERENTIAL_THRESHOLD = 10; // on the normalized 0-100 scale
 
+// A "typical" 24h move for a major FX pair, in percent — calibrates how
+// quickly the tanh scaling below approaches the 0/100 extremes. Min-max
+// normalizing raw % changes across only 5 currencies was blowing modest
+// real differences out to near-0/near-100 (e.g. 100 vs 2) even when the
+// underlying moves were small and close together — this produces a much
+// more moderate, realistic spread, matching what an established
+// currency-strength indicator actually shows.
+const TYPICAL_DAILY_MOVE_PERCENT = 0.3;
+
+function scoreFromChange(changePercent: number): number {
+  return 50 + 50 * Math.tanh(changePercent / TYPICAL_DAILY_MOVE_PERCENT);
+}
+
 function pctChangeOverLookback(candles: Candle[]): number | null {
   if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
   const recent = candles[candles.length - 1].close;
@@ -165,7 +178,11 @@ function pctChangeOverLookback(candles: Candle[]): number | null {
  *  2. % price change over STRENGTH_LOOKBACK_BARS for each pair.
  *  3. Convert each pair's change into a per-CURRENCY score (inverting
  *     USD/JPY since USD is the base currency in that pair).
- *  4. Normalize all scores onto a 0-100 scale across the basket.
+ *  4. Scale each currency's raw % change onto a 0-100 range centered at
+ *     50, using a smooth tanh curve rather than min-max across the
+ *     basket — this keeps the scale calibrated to what a real currency
+ *     move actually looks like, instead of being distorted by whichever
+ *     currency happens to be the extreme of just 5 data points.
  *  5. Differential = GBP score − AUD score → direction for GBP/AUD.
  *
  * Returns null if any required pair's data is missing/insufficient.
@@ -182,7 +199,7 @@ export function computeCurrencyStrength(
     return null;
   }
 
-  const rawScores: Record<string, number> = {
+  const rawChanges: Record<string, number> = {
     USD: 0,
     GBP: gbpusd,
     AUD: audusd,
@@ -190,14 +207,8 @@ export function computeCurrencyStrength(
     JPY: -usdjpy, // USD/JPY rising means USD strengthened, JPY weakened
   };
 
-  const values = Object.values(rawScores);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const normalize = (v: number) => ((v - min) / range) * 100;
-
-  const gbpScore = normalize(rawScores.GBP);
-  const audScore = normalize(rawScores.AUD);
+  const gbpScore = scoreFromChange(rawChanges.GBP);
+  const audScore = scoreFromChange(rawChanges.AUD);
   const differential = gbpScore - audScore;
 
   let direction: CurrencyStrengthResult['direction'] = 'neutral';
