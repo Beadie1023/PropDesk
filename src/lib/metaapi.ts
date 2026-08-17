@@ -30,7 +30,7 @@ export type OrderResult = {
 // a compile error if they ever try to pass anything else.
 export type Pair = 'GBPAUD';
 
-const API_BASE = import.meta.env.VITE_METAAPI_BACKEND_URL || '/api/metaapi';
+export const API_BASE = import.meta.env.VITE_METAAPI_BACKEND_URL || '/api/metaapi';
 
 export const apiHeaders = (extra?: Record<string, string>): Record<string, string> => ({
   'x-api-key': import.meta.env.VITE_METAAPI_API_KEY || '',
