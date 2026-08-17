@@ -10,7 +10,7 @@
 // that this supports manual review, not automated execution (Upcomers
 // doesn't permit EA trading on this account).
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-3.6-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `You are a technical market analysis assistant embedded in a personal trading journal app called PropDesk. You analyze recent GBP/AUD price action and indicator readings the app provides you, and give the trader a clear, honest read of what the chart is showing.
