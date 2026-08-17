@@ -51,7 +51,7 @@ export function AIAdvisorPanel() {
  CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
  );
 
- const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle>> = {};
+ const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
  CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
  candlesByPair[symbol] = basket[i];
  });
