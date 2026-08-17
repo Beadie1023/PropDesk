@@ -1,7 +1,7 @@
-// AI market analysis — calls the Claude API server-side. ANTHROPIC_API_KEY
-// stays here, never in the frontend (same reasoning as the MetaApi token:
-// a VITE_-prefixed key would be bundled into public JS and anyone loading
-// the site could rack up API usage on it).
+// AI market analysis — calls the Gemini API server-side (free tier).
+// GEMINI_API_KEY stays here, never in the frontend (same reasoning as the
+// MetaApi token: a VITE_-prefixed key would be bundled into public JS and
+// anyone loading the site could use up your free-tier quota).
 //
 // This is framed honestly to the end user as an AI-generated technical
 // read of the visible price data — not a claim of verified professional
@@ -10,8 +10,8 @@
 // that this supports manual review, not automated execution (Upcomers
 // doesn't permit EA trading on this account).
 
-const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-5';
+const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const SYSTEM_PROMPT = `You are a technical market analysis assistant embedded in a personal trading journal app called PropDesk. You analyze recent GBP/AUD price action and indicator readings the app provides you, and give the trader a clear, honest read of what the chart is showing.
 
@@ -24,45 +24,60 @@ Ground rules:
 - This is not financial advice, and you should say so briefly if the trader appears to be treating your read as a guarantee.`;
 
 /**
- * Calls Claude to analyze recent price/indicator data. `payload` is a
+ * Calls Gemini to analyze recent price/indicator data. `payload` is a
  * plain-language summary object built by the caller (not raw candle
  * arrays — keeps requests small and keeps the analysis focused on what
  * actually matters).
  */
 export async function analyzeMarket(payload) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set in the server environment.');
+    throw new Error('GEMINI_API_KEY is not set in the server environment.');
   }
 
   const userMessage = `Here's the current GBP/AUD market data:\n\n${JSON.stringify(payload, null, 2)}\n\nGive me a short read on current conditions.`;
 
-  const response = await fetch(ANTHROPIC_URL, {
+  const response = await fetch(GEMINI_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+      'x-goog-api-key': apiKey,
     },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 500,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      system_instruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userMessage }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: 500,
+      },
     }),
   });
 
   if (!response.ok) {
     const errorBody = await response.text().catch(() => '');
-    throw new Error(`Claude API request failed with status ${response.status}: ${errorBody.slice(0, 200)}`);
+    throw new Error(`Gemini API request failed with status ${response.status}: ${errorBody.slice(0, 200)}`);
   }
 
   const data = await response.json();
-  const textBlock = Array.isArray(data.content) ? data.content.find((b) => b.type === 'text') : null;
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-  if (!textBlock || typeof textBlock.text !== 'string') {
-    throw new Error('Claude API returned an unexpected response shape.');
+  if (typeof text !== 'string' || text.length === 0) {
+    // A common non-error case: the response was blocked by safety
+    // filters or truncated for hitting maxOutputTokens before any text
+    // was produced — surface that distinctly rather than a generic
+    // "unexpected shape" message.
+    const finishReason = data?.candidates?.[0]?.finishReason;
+    if (finishReason) {
+      throw new Error(`Gemini did not return text (finishReason: ${finishReason}).`);
+    }
+    throw new Error('Gemini API returned an unexpected response shape.');
   }
 
-  return textBlock.text;
+  return text;
 }
