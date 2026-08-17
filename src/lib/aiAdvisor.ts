@@ -2,11 +2,18 @@
 // x-api-key auth as the MetaApi client — same Express app, same shared
 // secret protecting every route.
 
-import { apiHeaders } from '@/lib/metaapi';
+import { API_BASE as METAAPI_BASE, apiHeaders } from '@/lib/metaapi';
 import type { Candle } from '@/lib/marketData';
 import type { CurrencyStrengthResult, LorentzianSignal } from '@/lib/signals';
 
-const AI_API_BASE = import.meta.env.VITE_AI_BACKEND_URL || '/api/ai';
+// Reuses the SAME backend host as the MetaApi client by default, since
+// both routes live on the same Express app — only VITE_METAAPI_BACKEND_URL
+// needs to be set, not a second AI-specific variable pointing at the same
+// place. VITE_AI_BACKEND_URL remains available as an explicit override for
+// anyone who genuinely hosts AI analysis on a different service.
+const AI_API_BASE =
+  import.meta.env.VITE_AI_BACKEND_URL ||
+  (METAAPI_BASE.endsWith('/api/metaapi') ? METAAPI_BASE.replace(/\/api\/metaapi$/, '/api/ai') : '/api/ai');
 
 export type AIAnalysisResult =
   | { status: 'ok'; analysis: string }
