@@ -54,7 +54,17 @@ export async function analyzeMarket(payload) {
         },
       ],
       generationConfig: {
-        maxOutputTokens: 500,
+        // gemini-3.6-flash is in the "Gemini 3" family, which uses
+        // thinkingLevel (not thinkingBudget, which is Gemini 2.5-only) and
+        // can't fully disable thinking. "low" minimizes reasoning-token
+        // usage. maxOutputTokens is raised well above the actual answer
+        // length needed, since thinking tokens count against this same
+        // budget — too low a cap was cutting the visible answer off
+        // mid-sentence after thinking consumed most of it.
+        thinkingConfig: {
+          thinkingLevel: 'low',
+        },
+        maxOutputTokens: 2048,
       },
     }),
   });
