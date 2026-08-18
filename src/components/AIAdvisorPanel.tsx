@@ -51,7 +51,7 @@ export function AIAdvisorPanel() {
  CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
  );
 
- const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
+ const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle>> = {};
  CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
  candlesByPair[symbol] = basket[i];
  });
@@ -104,7 +104,7 @@ export function AIAdvisorPanel() {
  >
  <div className="p-5 space-y-4">
 
- {/* Disclaimer */}
+ {/ Disclaimer /}
  <div className="flex items-start gap-2.5 rounded-lg border border-ink-600/40 bg-ink-900/40 p-3">
  <AlertTriangle className="h-4 w-4 text-steel-400 mt-0.5 shrink-0" />
  <p className="text-[11px] text-steel-400 leading-relaxed">
@@ -114,14 +114,14 @@ export function AIAdvisorPanel() {
  </p>
  </div>
 
- {/* Lorentzian Config Card */}
+ {/ Lorentzian Config Card /}
  {showConfig && (
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-4">
  <p className="text-xs font-semibold text-steel-300 uppercase tracking-wide">
  Lorentzian Classification v2.0 - GBP/AUD 30m
  </p>
 
- {/* Features Table */}
+ {/ Features Table /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Features</p>
  <table className="w-full text-xs text-steel-300">
@@ -146,7 +146,7 @@ export function AIAdvisorPanel() {
  </table>
  </div>
 
- {/* Filters */}
+ {/ Filters /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Filters</p>
  <div className="space-y-1.5">
@@ -159,7 +159,7 @@ export function AIAdvisorPanel() {
  </div>
  </div>
 
- {/* Kernel Settings */}
+ {/ Kernel Settings /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Kernel Settings</p>
  <div className="space-y-1.5">
@@ -178,7 +178,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Idle State */}
+ {/ Idle State /}
  {state.status === 'idle' && (
  <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
  <Bot className="h-8 w-8 text-steel-600" />
@@ -188,7 +188,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Loading State */}
+ {/ Loading State /}
  {state.status === 'loading' && (
  <div className="flex items-center justify-center gap-2 py-10 text-sm text-steel-400">
  <Loader2 className="h-4 w-4 animate-spin" />
@@ -196,7 +196,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Error State */}
+ {/ Error State /}
  {state.status === 'error' && (
  <div className="rounded-lg border border-bear-500/30 bg-bear-500/10 p-4">
  <p className="text-sm text-bear-300">
@@ -205,9 +205,9 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Success State */}
+ {/ Success State /}
  {state.status === 'ok' && (
- <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4">
+ <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 overflow-y-auto max-h-[480px]">
  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
  {state.analysis}
  </p>
