@@ -7,7 +7,7 @@ const SEED_FLAG_KEY = 'propdesk:seeded';
 // Bump this whenever the Account/Trade shape changes. Anyone with older
 // cached localStorage data (e.g. from before the drawdown-model rewrite)
 // gets reseeded automatically instead of crashing on missing fields.
-const SCHEMA_VERSION = '5';
+const SCHEMA_VERSION = '6';
 
 const SEED_ACCOUNTS: Account[] = [
   {
@@ -15,12 +15,13 @@ const SEED_ACCOUNTS: Account[] = [
     name: 'Ember',
     firm: 'Upcomers',
     type: 'Instant Funded',
-    // Matches the real Upcomers dashboard snapshot (2026-08-14): current
-    // balance $2,001.32, high-water mark $2,002.48. Starting balance and
-    // floorBalance stay as the account's original seed values — the real
-    // stop-out floor is now computed live via currentFloorBalance() in
-    // trading.ts, which tracks the high-water mark as it moves.
-    balance: 2001.32,
+    // Matches the real Upcomers dashboard snapshot (2026-08-19): current
+    // balance $2,001.31, high-water mark $2,002.48 (still the 2026-08-13
+    // peak — no new high since). Starting balance and floorBalance stay
+    // as the account's original seed values — the real stop-out floor is
+    // computed live via currentFloorBalance() in trading.ts, which
+    // tracks the high-water mark as it moves.
+    balance: 2001.31,
     startingBalance: 2000,
     highWaterMark: 2002.48,
     floorBalance: 1920,
@@ -103,6 +104,28 @@ const SEED_TRADES: Trade[] = [
     swap: 0,
     open_time: '2026-08-14T03:38:14Z',
     close_time: '2026-08-14T07:50:29Z',
+    notes: 'Real trade — added manually from MT5 history (no CSV export available)',
+    account_name: 'Ember',
+    source: 'manual',
+  },
+  {
+    id: 'ember-real-4',
+    trade_date: '2026-08-19',
+    pair: 'GBPAUD',
+    direction: 'short',
+    rr_used: '',
+    entry_price: 1.91198,
+    sl: 1.91435,
+    tp1: 1.91037,
+    tp2: 1.91037,
+    close_price: 1.91193,
+    lots: 0.01,
+    result: 'loss',
+    dollar_amount: 0.04,
+    commission: -0.05,
+    swap: 0,
+    open_time: '2026-08-19T15:12:39Z',
+    close_time: '2026-08-19T16:31:50Z',
     notes: 'Real trade — added manually from MT5 history (no CSV export available)',
     account_name: 'Ember',
     source: 'manual',
