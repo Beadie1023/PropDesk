@@ -3,13 +3,16 @@ import {
   CandlestickSeries,
   ColorType,
   createChart,
+  LineStyle,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { Loader2, LineChart } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
+import { computeSupportResistance } from '@/lib/levels';
 
 // This chart is hardcoded to a single pair — no selector.
 const PAIR = 'GBPAUD';
@@ -107,13 +110,45 @@ function toChartData(candles: Candle[]) {
   return candles.map((c) => ({ ...c, time: c.time as UTCTimestamp }));
 }
 
+const RESISTANCE_COLOR = '#f87171';
+const SUPPORT_COLOR = '#4ade80';
+
 export function ChartPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [usingSampleData, setUsingSampleData] = useState(false);
+
+  // Redraws support/resistance lines, clearing any previously drawn ones
+  // first — otherwise re-fetches would keep stacking new lines on top of
+  // stale ones instead of replacing them.
+  function drawSupportResistance(rawCandles: Candle[]) {
+    const series = seriesRef.current;
+    if (!series) return;
+
+    priceLinesRef.current.forEach((line) => series.removePriceLine(line));
+    priceLinesRef.current = [];
+
+    // Computed from the RAW candles, never the Heikin Ashi-transformed
+    // ones — HA intentionally smooths/lags price, which would blur
+    // exactly the price reactions this is meant to find.
+    const levels = computeSupportResistance(rawCandles);
+
+    for (const level of levels) {
+      const line = series.createPriceLine({
+        price: level.price,
+        color: level.type === 'resistance' ? RESISTANCE_COLOR : SUPPORT_COLOR,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: `${level.type === 'resistance' ? 'R' : 'S'} (${level.touches}x)`,
+      });
+      priceLinesRef.current.push(line);
+    }
+  }
 
   // Create the chart once and let it resize with its container.
   useEffect(() => {
@@ -158,6 +193,7 @@ export function ChartPanel() {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      priceLinesRef.current = [];
     };
   }, []);
 
@@ -171,12 +207,15 @@ export function ChartPanel() {
       .then((candles) => {
         if (cancelled) return;
         seriesRef.current?.setData(toChartData(toHeikinAshi(candles)));
+        drawSupportResistance(candles);
         chartRef.current?.timeScale().fitContent();
         setUsingSampleData(false);
       })
       .catch(() => {
         if (cancelled) return;
-        seriesRef.current?.setData(toChartData(toHeikinAshi(generateSampleCandles())));
+        const sample = generateSampleCandles();
+        seriesRef.current?.setData(toChartData(toHeikinAshi(sample)));
+        drawSupportResistance(sample);
         chartRef.current?.timeScale().fitContent();
         setUsingSampleData(true);
       })
@@ -194,8 +233,8 @@ export function ChartPanel() {
       title={`${PAIR_LABEL} Price Chart`}
       subtitle={
         usingSampleData
-          ? 'Heikin Ashi candles — sample data (Twelve Data unavailable)'
-          : 'Heikin Ashi candles — live 1H data from Twelve Data'
+          ? 'Heikin Ashi candles + support/resistance — sample data (Twelve Data unavailable)'
+          : 'Heikin Ashi candles + support/resistance — live 1H data from Twelve Data'
       }
       icon={<LineChart className="h-5 w-5" />}
     >
