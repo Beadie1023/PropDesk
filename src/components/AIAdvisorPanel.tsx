@@ -61,8 +61,12 @@ export function AIAdvisorPanel() {
 
       const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
       CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
-        candlesByPair[symbol] = basket[i];
+        candlesByPair[symbol] = basket[i] ?? [];
       });
+
+      if (gbpaud.length === 0) {
+        throw new Error(`No ${PAIR_SYMBOL} candle data was returned.`);
+      }
 
       const lorentzian = computeLorentzianSignal(gbpaud);
       const currencyStrength = computeCurrencyStrength(candlesByPair);
@@ -138,7 +142,7 @@ export function AIAdvisorPanel() {
         {showConfig && (
           <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-4">
             <p className="text-xs font-semibold text-steel-300 uppercase tracking-wide">
-              Lorentzian Classification v2.0 - GBP/AUD 30m
+              Lorentzian Classification v2.0 - GBP/AUD 1h
             </p>
 
             {/* Features Table */}
