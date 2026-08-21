@@ -1,8 +1,17 @@
+
 import { useState } from 'react';
 import { AlertTriangle, Bot, Loader2, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { fetchCandlesSequential, fetchTwelveDataCandles } from '@/lib/marketData';
-import { CURRENCY_STRENGTH_PAIRS, computeCurrencyStrength, computeLorentzianSignal } from '@/lib/signals';
+import {
+ CURRENCY_STRENGTH_PAIRS,
+ computeCurrencyStrength,
+ computeLorentzianSignal,
+ computeKernelRegression,
+ computePositionMarker,
+ type KernelResult,
+ type PositionMarker,
+} from '@/lib/signals';
 import { analyzeMarket, type AIAnalysisResult } from '@/lib/aiAdvisor';
 import type { Candle } from '@/lib/marketData';
 
@@ -11,7 +20,7 @@ const PAIR_SYMBOL = 'GBP/AUD';
 type PanelState =
  | { status: 'idle' }
  | { status: 'loading' }
- | { status: 'ok'; analysis: string; computedAt: Date }
+ | { status: 'ok'; analysis: string; computedAt: Date; kernel: KernelResult; marker: PositionMarker }
  | { status: 'error'; message: string };
 
 const LORENTZIAN_FEATURES = [
@@ -51,17 +60,30 @@ export function AIAdvisorPanel() {
  CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
  );
 
- const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
+ const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle>> = {};
  CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
  candlesByPair[symbol] = basket[i];
  });
 
  const lorentzian = computeLorentzianSignal(gbpaud);
  const currencyStrength = computeCurrencyStrength(candlesByPair);
+ const kernel = computeKernelRegression(gbpaud);
+ const lastClose = gbpaud[gbpaud.length - 1].close;
+ const marker = computePositionMarker(
+ lastClose,
+ kernel.direction === 'neutral' ? 'bearish' : kernel.direction,
+ );
+
  const result: AIAnalysisResult = await analyzeMarket(gbpaud, lorentzian, currencyStrength);
 
  if (result.status === 'ok') {
- setState({ status: 'ok', analysis: result.analysis, computedAt: new Date() });
+ setState({
+ status: 'ok',
+ analysis: result.analysis,
+ computedAt: new Date(),
+ kernel,
+ marker,
+ });
  } else {
  setState({ status: 'error', message: result.message });
  }
@@ -104,7 +126,7 @@ export function AIAdvisorPanel() {
  >
  <div className="p-5 space-y-4">
 
- {/* Disclaimer */}
+ {/ Disclaimer /}
  <div className="flex items-start gap-2.5 rounded-lg border border-ink-600/40 bg-ink-900/40 p-3">
  <AlertTriangle className="h-4 w-4 text-steel-400 mt-0.5 shrink-0" />
  <p className="text-[11px] text-steel-400 leading-relaxed">
@@ -114,14 +136,14 @@ export function AIAdvisorPanel() {
  </p>
  </div>
 
- {/* Lorentzian Config Card */}
+ {/ Lorentzian Config Card /}
  {showConfig && (
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-4">
  <p className="text-xs font-semibold text-steel-300 uppercase tracking-wide">
  Lorentzian Classification v2.0 - GBP/AUD 30m
  </p>
 
- {/* Features Table */}
+ {/ Features Table /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Features</p>
  <table className="w-full text-xs text-steel-300">
@@ -146,7 +168,7 @@ export function AIAdvisorPanel() {
  </table>
  </div>
 
- {/* Filters */}
+ {/ Filters /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Filters</p>
  <div className="space-y-1.5">
@@ -159,7 +181,7 @@ export function AIAdvisorPanel() {
  </div>
  </div>
 
- {/* Kernel Settings */}
+ {/ Kernel Settings /}
  <div>
  <p className="text-[11px] text-steel-500 uppercase tracking-wide mb-2">Kernel Settings</p>
  <div className="space-y-1.5">
@@ -178,7 +200,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Idle State */}
+ {/ Idle State /}
  {state.status === 'idle' && (
  <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
  <Bot className="h-8 w-8 text-steel-600" />
@@ -188,7 +210,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Loading State */}
+ {/ Loading State /}
  {state.status === 'loading' && (
  <div className="flex items-center justify-center gap-2 py-10 text-sm text-steel-400">
  <Loader2 className="h-4 w-4 animate-spin" />
@@ -196,7 +218,7 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Error State */}
+ {/ Error State /}
  {state.status === 'error' && (
  <div className="rounded-lg border border-bear-500/30 bg-bear-500/10 p-4">
  <p className="text-sm text-bear-300">
@@ -205,8 +227,106 @@ export function AIAdvisorPanel() {
  </div>
  )}
 
- {/* Success State */}
+ {/ Success State /}
  {state.status === 'ok' && (
+ <div className="space-y-4">
+
+ {/ Kernel Regression Card /}
+ <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
+ <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
+ Nadaraya-Watson Kernel Regression
+ </p>
+
+ <div className="grid grid-cols-2 gap-3">
+ <div className="space-y-0.5">
+ <p className="text-[11px] text-steel-500">Kernel Estimate</p>
+ <p className="text-sm font-mono text-slate-200">
+ {state.kernel.estimate.toFixed(5)}
+ </p>
+ </div>
+ <div className="space-y-0.5">
+ <p className="text-[11px] text-steel-500">Lagged Estimate</p>
+ <p className="text-sm font-mono text-slate-200">
+ {state.kernel.laggedEstimate.toFixed(5)}
+ </p>
+ </div>
+ <div className="space-y-0.5">
+ <p className="text-[11px] text-steel-500">Direction</p>
+ <p className={text-sm font-semibold capitalize ${
+ state.kernel.direction === 'bullish'
+ ? 'text-bull-400'
+ : state.kernel.direction === 'bearish'
+ ? 'text-bear-400'
+ : 'text-steel-400'
+ }}>
+ {state.kernel.direction}
+ </p>
+ </div>
+ <div className="space-y-0.5">
+ <p className="text-[11px] text-steel-500">Trend Filter (-0.1)</p>
+ <p className={text-sm font-semibold ${
+ state.kernel.trendFilterPassed ? 'text-bull-400' : 'text-bear-400'
+ }}>
+ {state.kernel.trendFilterPassed ? 'Passed' : 'Blocked'}
+ </p>
+ </div>
+ </div>
+
+ {/ Trend Filter Signal Marker /}
+ <div className={flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ${
+ ? 'bg-bull-500/10 border border-bull-500/30 text-bull-300'
+ : 'bg-bear-500/10 border border-bear-500/30 text-bear-300'
+ }}>
+ <span className={h-2 w-2 rounded-full shrink-0 ${
+ state.kernel.trendFilterPassed ? 'bg-bull-400' : 'bg-bear-400'
+ }} />
+ {state.kernel.trendFilterPassed
+ ? 'Trend filter clear - kernel signal active'
+ : 'Trend filter blocked - regime below -0.1 threshold'}
+ </div>
+ </div>
+
+ {/ 1:3 Position Marker Card /}
+ <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
+ <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
+ Position Marker · 1:3 Risk/Reward
+ </p>
+
+ <div className="space-y-2">
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Take Profit</span>
+ <span className="font-mono text-bull-300">
+ {state.marker.takeProfit.toFixed(5)}
+ </span>
+ </div>
+ <div className="relative h-px bg-ink-700/60 mx-1">
+ <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bull-400" />
+ </div>
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Entry</span>
+ <span className="font-mono text-slate-200">
+ {state.marker.entry.toFixed(5)}
+ </span>
+ </div>
+ <div className="relative h-px bg-ink-700/60 mx-1">
+ <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bear-400" />
+ </div>
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Stop Loss</span>
+ <span className="font-mono text-bear-300">
+ {state.marker.stopLoss.toFixed(5)}
+ </span>
+ </div>
+ </div>
+
+ <div className="flex justify-between text-[11px] text-steel-500 pt-1 border-t border-ink-700/40">
+ <span>Risk: {state.marker.riskAmount.toFixed(5)}</span>
+ <span>Reward: {state.marker.rewardAmount.toFixed(5)}</span>
+ <span className="text-steel-300 font-semibold">Ratio 1:3</span>
+ </div>
+ </div>
+
+ {/ AI Analysis Card /}
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 overflow-y-auto max-h-[480px]">
  <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
  {state.analysis}
@@ -215,9 +335,12 @@ export function AIAdvisorPanel() {
  Generated {state.computedAt.toLocaleTimeString()}
  </p>
  </div>
+
+ </div>
  )}
 
  </div>
  </Panel>
  );
 }
+``
