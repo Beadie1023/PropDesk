@@ -1,264 +1,197 @@
-// Original signal-generation engine — NOT a port of any specific
-// TradingView author's script. Implements the general published concepts
-// (Lorentzian-distance KNN classification; multi-pair currency strength)
-// from scratch.
-//
-// This is a heuristic tool with no verified track record. It generates a
-// signal for you to evaluate and act on manually — it is never wired to
-// order placement.
 
-import type { Candle } from './marketData';
+import type { Candle } from '@/lib/marketData';
 
-// ---------------------------------------------------------------------------
-// Indicators
-// ---------------------------------------------------------------------------
+// --- Currency Strength Pairs ---
 
-function computeRSI(closes: number[], period: number): number[] {
-  const rsi: number[] = new Array(closes.length).fill(NaN);
-  if (closes.length <= period) return rsi;
+export const CURRENCY_STRENGTH_PAIRS = [
+ 'EUR/USD',
+ 'GBP/USD',
+ 'AUD/USD',
+ 'USD/JPY',
+ 'USD/CHF',
+ 'USD/CAD',
+ 'NZD/USD',
+ 'EUR/GBP',
+] as const;
 
-  let gains = 0;
-  let losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses -= diff;
-  }
-  let avgGain = gains / period;
-  let avgLoss = losses / period;
-  rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-
-  for (let i = period + 1; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    const gain = diff > 0 ? diff : 0;
-    const loss = diff < 0 ? -diff : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
-  }
-  return rsi;
-}
-
-function computeROC(closes: number[], period: number): number[] {
-  const roc: number[] = new Array(closes.length).fill(NaN);
-  for (let i = period; i < closes.length; i++) {
-    const past = closes[i - period];
-    if (past !== 0) roc[i] = ((closes[i] - past) / past) * 100;
-  }
-  return roc;
-}
-
-// ---------------------------------------------------------------------------
-// Lorentzian-distance KNN classifier
-// ---------------------------------------------------------------------------
-
-// Lorentzian distance: sum of log(1 + |a_i - b_i|) per feature. Compresses
-// large feature differences into log-space, making the nearest-neighbor
-// search less dominated by any single volatile feature than Euclidean
-// distance would be.
-function lorentzianDistance(a: number[], b: number[]): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += Math.log(1 + Math.abs(a[i] - b[i]));
-  }
-  return sum;
-}
+// --- Lorentzian Classification ---
 
 export type LorentzianSignal = {
-  direction: 'bullish' | 'bearish' | 'neutral';
-  confidence: number; // 0-100, % of nearest neighbors that were bullish
-  neighborsUsed: number;
+ direction: 'bullish' | 'bearish' | 'neutral';
+ confidence: number;
+ nearestBars: number;
+ bullishCount: number;
+ bearishCount: number;
 };
 
-// How many bars ahead a historical point's outcome is measured over.
-const LOOKAHEAD_BARS = 4;
-// How many nearest neighbors vote on the current bar's classification.
-const K_NEIGHBORS = 20;
-// Confidence thresholds for calling a direction rather than "neutral".
-const BULLISH_THRESHOLD = 60;
-const BEARISH_THRESHOLD = 40;
-
-/**
- * Classifies the most recent bar as bullish/bearish/neutral by finding the
- * K historical bars with the most similar RSI(14)/RSI(9)/ROC(10) feature
- * vector (by Lorentzian distance) and taking a majority vote of what
- * price did LOOKAHEAD_BARS after each of those historical bars.
- *
- * Returns null if there isn't enough history to compute a reliable
- * result — callers must treat null as "no signal", never as neutral.
- */
-export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | null {
-  const MIN_CANDLES = 60;
-  if (candles.length < MIN_CANDLES) return null;
-
-  const closes = candles.map((c) => c.close);
-  const rsi14 = computeRSI(closes, 14);
-  const rsi9 = computeRSI(closes, 9);
-  const roc10 = computeROC(closes, 10);
-
-  type Point = { features: number[]; label: 0 | 1 };
-  const points: Point[] = [];
-
-  const minIdx = 15;
-  const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
-
-  for (let i = minIdx; i <= maxIdx; i++) {
-    if (Number.isNaN(rsi14[i]) || Number.isNaN(rsi9[i]) || Number.isNaN(roc10[i])) continue;
-    const future = closes[i + LOOKAHEAD_BARS];
-    const label: 0 | 1 = future > closes[i] ? 1 : 0;
-    points.push({ features: [rsi14[i], rsi9[i], roc10[i]], label });
-  }
-
-  if (points.length < K_NEIGHBORS) return null;
-
-  const lastIdx = closes.length - 1;
-  if (Number.isNaN(rsi14[lastIdx]) || Number.isNaN(rsi9[lastIdx]) || Number.isNaN(roc10[lastIdx])) {
-    return null;
-  }
-  const current = [rsi14[lastIdx], rsi9[lastIdx], roc10[lastIdx]];
-
-  const distances = points
-    .map((p) => ({ d: lorentzianDistance(current, p.features), label: p.label }))
-    .sort((a, b) => a.d - b.d);
-
-  const neighbors = distances.slice(0, K_NEIGHBORS);
-  const bullishVotes = neighbors.filter((n) => n.label === 1).length;
-  const confidence = (bullishVotes / neighbors.length) * 100;
-
-  let direction: LorentzianSignal['direction'] = 'neutral';
-  if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
-  else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
-
-  return { direction, confidence, neighborsUsed: neighbors.length };
+function rsi(closes: number[], period: number): number {
+ if (closes.length < period + 1) return 50;
+ let gains = 0;
+ let losses = 0;
+ for (let i = closes.length - period; i < closes.length; i++) {
+ const diff = closes[i] - closes[i - 1];
+ if (diff > 0) gains += diff;
+ else losses += Math.abs(diff);
+ }
+ const rs = gains / (losses || 1);
+ return 100 - 100 / (1 + rs);
 }
 
-// ---------------------------------------------------------------------------
-// Currency strength (5-step)
-// ---------------------------------------------------------------------------
+function cci(candles: Candle[], period: number): number {
+ if (candles.length < period) return 0;
+ const slice = candles.slice(-period);
+ const typicals = slice.map((c) => (c.high + c.low + c.close) / 3);
+ const mean = typicals.reduce((a, b) => a + b, 0) / period;
+ const meanDev = typicals.reduce((a, b) => a + Math.abs(b - mean), 0) / period;
+ return (typicals[typicals.length - 1] - mean) / (0.015  (meanDev || 1));
+}
 
-// Basket needed to derive GBP and AUD strength against a common USD
-// reference, plus EUR/JPY for a wider comparison basket.
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/USD', 'USD/JPY'] as const;
+function adx(candles: Candle[], period: number): number {
+ if (candles.length < period + 1) return 0;
+ const slice = candles.slice(-(period + 1));
+ let plusDM = 0;
+ let minusDM = 0;
+ let trSum = 0;
+ for (let i = 1; i < slice.length; i++) {
+ const high = slice[i].high - slice[i - 1].high;
+ const low = slice[i - 1].low - slice[i].low;
+ plusDM += high > low && high > 0 ? high : 0;
+ minusDM += low > high && low > 0 ? low : 0;
+ trSum += Math.max(
+ slice[i].high - slice[i].low,
+ Math.abs(slice[i].high - slice[i - 1].close),
+ Math.abs(slice[i].low - slice[i - 1].close),
+ );
+ }
+ const plusDI = (plusDM / (trSum || 1))  100;
+ const minusDI = (minusDM / (trSum || 1))  100;
+ const dx = (Math.abs(plusDI - minusDI) / ((plusDI + minusDI) || 1))  100;
+ return dx;
+}
+
+function wt(closes: number[], channelLen: number, avgLen: number): number {
+ if (closes.length < channelLen + avgLen) return 0;
+ const slice = closes.slice(-channelLen);
+ const esa = slice.reduce((a, b) => a + b, 0) / channelLen;
+ const d = slice.reduce((a, b) => a + Math.abs(b - esa), 0) / channelLen;
+ const ci = (closes[closes.length - 1] - esa) / (0.015  (d || 1));
+ return ci;
+}
+
+function lorentzianDistance(a: number[], b: number[]): number {
+ return a.reduce((sum, val, i) => sum + Math.log(1 + Math.abs(val - b[i])), 0);
+}
+
+export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal {
+ if (candles.length < 50) {
+ return {
+ direction: 'neutral',
+ confidence: 0,
+ nearestBars: 0,
+ bullishCount: 0,
+ bearishCount: 0,
+ };
+ }
+
+ const closes = candles.map((c) => c.close);
+ const NEIGHBORS = 20;
+
+ const currentFeatures = [
+ rsi(closes, 14),
+ wt(closes, 10, 11),
+ cci(candles, 20),
+ adx(candles, 20),
+ rsi(closes, 9),
+ ];
+
+ const distances: { dist: number; label: 'bullish' | 'bearish' }[] = [];
+
+ for (let i = 20; i < candles.length - 1; i++) {
+ const historicalCloses = closes.slice(0, i + 1);
+ const historicalCandles = candles.slice(0, i + 1);
+ const features = [
+ rsi(historicalCloses, 14),
+ wt(historicalCloses, 10, 11),
+ cci(historicalCandles, 20),
+ adx(historicalCandles, 20),
+ rsi(historicalCloses, 9),
+ ];
+ const dist = lorentzianDistance(currentFeatures, features);
+ const label = closes[i + 1] > closes[i] ? 'bullish' : 'bearish';
+ distances.push({ dist, label });
+ }
+
+ distances.sort((a, b) => a.dist - b.dist);
+ const nearest = distances.slice(0, NEIGHBORS);
+ const bullishCount = nearest.filter((n) => n.label === 'bullish').length;
+ const bearishCount = nearest.filter((n) => n.label === 'bearish').length;
+ const direction =
+ bullishCount > bearishCount
+ ? 'bullish'
+ : bearishCount > bullishCount
+ ? 'bearish'
+ : 'neutral';
+ const confidence = Math.max(bullishCount, bearishCount) / NEIGHBORS;
+
+ return {
+ direction,
+ confidence,
+ nearestBars: NEIGHBORS,
+ bullishCount,
+ bearishCount,
+ };
+}
+
+// --- Currency Strength ---
 
 export type CurrencyStrengthResult = {
-  gbpScore: number;
-  audScore: number;
-  differential: number; // gbpScore - audScore
-  direction: 'bullish' | 'bearish' | 'neutral'; // for GBP/AUD specifically
+ GBP: number;
+ AUD: number;
+ raw: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], number>>;
 };
 
-const STRENGTH_LOOKBACK_BARS = 24; // ~1 day of hourly bars
-const STRENGTH_DIFFERENTIAL_THRESHOLD = 10; // on the normalized 0-100 scale
-
-// A "typical" 24h move for a major FX pair, in percent — calibrates how
-// quickly the tanh scaling below approaches the 0/100 extremes. Min-max
-// normalizing raw % changes across only 5 currencies was blowing modest
-// real differences out to near-0/near-100 (e.g. 100 vs 2) even when the
-// underlying moves were small and close together — this produces a much
-// more moderate, realistic spread, matching what an established
-// currency-strength indicator actually shows.
-const TYPICAL_DAILY_MOVE_PERCENT = 0.3;
-
-function scoreFromChange(changePercent: number): number {
-  return 50 + 50 * Math.tanh(changePercent / TYPICAL_DAILY_MOVE_PERCENT);
-}
-
-function pctChangeOverLookback(candles: Candle[]): number | null {
-  if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
-  const recent = candles[candles.length - 1].close;
-  const past = candles[candles.length - 1 - STRENGTH_LOOKBACK_BARS].close;
-  if (past === 0) return null;
-  return ((recent - past) / past) * 100;
-}
-
-/**
- * 5-step currency strength:
- *  1. Basket of pairs (CURRENCY_STRENGTH_PAIRS) covering GBP, AUD, EUR,
- *     JPY, all against USD as a common reference.
- *  2. % price change over STRENGTH_LOOKBACK_BARS for each pair.
- *  3. Convert each pair's change into a per-CURRENCY score (inverting
- *     USD/JPY since USD is the base currency in that pair).
- *  4. Scale each currency's raw % change onto a 0-100 range centered at
- *     50, using a smooth tanh curve rather than min-max across the
- *     basket — this keeps the scale calibrated to what a real currency
- *     move actually looks like, instead of being distorted by whichever
- *     currency happens to be the extreme of just 5 data points.
- *  5. Differential = GBP score − AUD score → direction for GBP/AUD.
- *
- * Returns null if any required pair's data is missing/insufficient.
- */
 export function computeCurrencyStrength(
-  candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>>,
-): CurrencyStrengthResult | null {
-  const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] ?? []);
-  const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] ?? []);
-  const eurusd = pctChangeOverLookback(candlesByPair['EUR/USD'] ?? []);
-  const usdjpy = pctChangeOverLookback(candlesByPair['USD/JPY'] ?? []);
+ candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>>,
+): CurrencyStrengthResult {
+ const changes: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], number>> = {};
 
-  if (gbpusd === null || audusd === null || eurusd === null || usdjpy === null) {
-    return null;
-  }
+ for (const pair of CURRENCY_STRENGTH_PAIRS) {
+ const candles = candlesByPair[pair];
+ if (!candles || candles.length < 2) continue;
+ const last = candles[candles.length - 1].close;
+ const prev = candles[candles.length - 2].close;
+ changes[pair] = (last - prev) / prev;
+ }
 
-  const rawChanges: Record<string, number> = {
-    USD: 0,
-    GBP: gbpusd,
-    AUD: audusd,
-    EUR: eurusd,
-    JPY: -usdjpy, // USD/JPY rising means USD strengthened, JPY weakened
-  };
+ const gbpChange =
+ (changes['GBP/USD'] ?? 0) +
+ (changes['EUR/GBP'] !== undefined ? -changes['EUR/GBP'] : 0);
 
-  const gbpScore = scoreFromChange(rawChanges.GBP);
-  const audScore = scoreFromChange(rawChanges.AUD);
-  const differential = gbpScore - audScore;
+ const audChange = changes['AUD/USD'] ?? 0;
 
-  let direction: CurrencyStrengthResult['direction'] = 'neutral';
-  if (differential >= STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bullish';
-  else if (differential <= -STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bearish';
+ const normalize = (val: number) => Math.min(100, Math.max(0, 50 + val  5000));
 
-  return { gbpScore, audScore, differential, direction };
+ return {
+ GBP: normalize(gbpChange),
+ AUD: normalize(audChange),
+ raw: changes,
+ };
 }
 
-// ---------------------------------------------------------------------------
-// Combined signal
-// ---------------------------------------------------------------------------
-
-export type OverallSignal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'conflicting';
-
-/**
- * Confluence of both sub-indicators. "conflicting" means they actively
- * disagree (one bullish, one bearish) — treated as its own state, not
- * averaged away to neutral, since that disagreement is itself meaningful
- * information (lower confidence in either read).
- */
-export function combineSignals(
-  lorentzian: LorentzianSignal | null,
-  currencyStrength: CurrencyStrengthResult | null,
-): OverallSignal {
-  if (!lorentzian || !currencyStrength) return 'neutral';
-
-  const l = lorentzian.direction;
-  const c = currencyStrength.direction;
-
-  if (l === 'bullish' && c === 'bullish') return 'strong_buy';
-  if (l === 'bearish' && c === 'bearish') return 'strong_sell';
-  if ((l === 'bullish' && c === 'bearish') || (l === 'bearish' && c === 'bullish')) return 'conflicting';
-  if (l === 'bullish' || c === 'bullish') return 'buy';
-  if (l === 'bearish' || c === 'bearish') return 'sell';
-  return 'neutral';
-}
 // --- Nadaraya-Watson Kernel Regression ---
 
-const KERNEL_H = 8; // Lookback Window
-const KERNEL_R = 8; // Relative Weighting
-const KERNEL_X0 = 25; // Regression Level
-const KERNEL_LAG = 2; // Lag
+const KERNEL_H = 8;
+const KERNEL_R = 8;
+const KERNEL_X0 = 25;
+const KERNEL_LAG = 2;
+const TREND_FILTER_THRESHOLD = -0.1;
 
 function rationalQuadraticKernel(
- candles: Candle,
+ candles: Candle[],
  h: number,
  r: number,
  x0: number,
-): number {
+): number[] {
  const n = candles.length;
  const closes = candles.map((c) => c.close);
  const estimates: number[] = [];
@@ -271,26 +204,28 @@ function rationalQuadraticKernel(
  weightSum += w;
  valueSum += w  closes[i - j];
  }
- estimates.push(valueSum / weightSum);
+ estimates.push(valueSum / (weightSum || 1));
  }
 
  return estimates;
 }
 
 export type KernelResult = {
- estimate: number; // current smoothed price
- laggedEstimate: number; // lagged estimate for crossover detection
+ estimate: number;
+ laggedEstimate: number;
  direction: 'bullish' | 'bearish' | 'neutral';
- trendFilterPassed: boolean; // regime filter at -0.1 threshold
+ trendFilterPassed: boolean;
+ trendValue: number;
 };
 
-export function computeKernelRegression(candles: Candle): KernelResult {
+export function computeKernelRegression(candles: Candle[]): KernelResult {
  if (candles.length < KERNEL_X0 + KERNEL_LAG) {
  return {
  estimate: candles[candles.length - 1]?.close ?? 0,
  laggedEstimate: candles[candles.length - 1]?.close ?? 0,
  direction: 'neutral',
  trendFilterPassed: false,
+ trendValue: 0,
  };
  }
 
@@ -299,10 +234,8 @@ export function computeKernelRegression(candles: Candle): KernelResult {
  const lagged = estimates[estimates.length - 1 - KERNEL_LAG];
  const prev = estimates[estimates.length - 2];
 
- // Trend detection filter - threshold -0.1
  const trendValue = last - prev;
- const trendFilterPassed = trendValue > -0.1;
-
+ const trendFilterPassed = trendValue > TREND_FILTER_THRESHOLD;
  const direction =
  last > lagged ? 'bullish' : last < lagged ? 'bearish' : 'neutral';
 
@@ -311,10 +244,15 @@ export function computeKernelRegression(candles: Candle): KernelResult {
  laggedEstimate: lagged,
  direction,
  trendFilterPassed,
+ trendValue,
  };
 }
 
-// 1:3 risk/reward position marker
+// --- Position Marker ---
+
+const DEFAULT_STOP_PIPS = 0.0024;
+const RR_RATIO = 3;
+
 export type PositionMarker = {
  entry: number;
  stopLoss: number;
@@ -327,10 +265,10 @@ export type PositionMarker = {
 export function computePositionMarker(
  entry: number,
  direction: 'bullish' | 'bearish',
- stopPips: number = 0.0024, // default stop distance for GBP/AUD
+ stopPips: number = DEFAULT_STOP_PIPS,
 ): PositionMarker {
  const riskAmount = stopPips;
- const rewardAmount = stopPips  3;
+ const rewardAmount = stopPips  RR_RATIO;
 
  const stopLoss =
  direction === 'bullish' ? entry - riskAmount : entry + riskAmount;
