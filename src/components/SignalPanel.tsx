@@ -276,7 +276,7 @@ export function SignalPanel() {
                           : 'Neutral'}
                     </p>
                     <p className="text-[11px] text-steel-500 mt-1">
-                      {state.lorentzian.confidence.toFixed(0)}% of {state.lorentzian.neighborsUsed} nearest
+                      {state.lorentzian.confidence.toFixed(0)}% of {state.lorentzian.nearestBars} nearest
                       historical bars agreed
                     </p>
                   </>
