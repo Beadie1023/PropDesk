@@ -93,7 +93,6 @@ export function AIAdvisorPanel() {
       });
     }
   };
-
   return (
     <Panel
       title="AI Market Advisor"
@@ -202,139 +201,56 @@ export function AIAdvisorPanel() {
         {/* Idle State */}
         {state.status === 'idle' && (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
-            <Bot className="h-8 w-8 text-steel-600" />
-            <p className="text-sm text-steel-500">
-              Click "Analyze" to get a read on current GBP/AUD conditions.
-            </p>
+            <Bot className="h-8 w-8 text-steel-500" />
+            <p className="text-sm text-steel-400">Click Analyze to get market insights.</p>
           </div>
         )}
 
         {/* Loading State */}
         {state.status === 'loading' && (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-steel-400">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Gathering market data and generating analysis…
+          <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-steel-400" />
+            <p className="text-sm text-steel-400">Fetching market data and processing algorithms...</p>
           </div>
         )}
 
         {/* Error State */}
         {state.status === 'error' && (
-          <div className="rounded-lg border border-bear-500/30 bg-bear-500/10 p-4">
-            <p className="text-sm text-bear-300">
-              Couldn't generate analysis: {state.message}
-            </p>
+          <div className="rounded-lg border border-red-900/40 bg-red-950/20 p-4 text-center">
+            <p className="text-sm text-red-400">{state.message}</p>
           </div>
         )}
 
-        {/* Success State */}
+        {/* Analysis Output (OK State) */}
         {state.status === 'ok' && (
           <div className="space-y-4">
-
-            {/* Kernel Regression Card */}
-            <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
-              <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
-                Nadaraya-Watson Kernel Regression
-              </p>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-0.5">
-                  <p className="text-[11px] text-steel-500">Kernel Estimate</p>
-                  <p className="text-sm font-mono text-slate-200">
-                    {state.kernel.estimate.toFixed(5)}
-                  </p>
-                </div>
-                <div className="space-y-0.5">
-                  <p className="text-[11px] text-steel-500">Lagged Estimate</p>
-                  <p className="text-sm font-mono text-slate-200">
-                    {state.kernel.laggedEstimate.toFixed(5)}
-                  </p>
-                </div>
-                <div className="space-y-0.5">
-                  <p className="text-[11px] text-steel-500">Direction</p>
-                  <p className={`text-sm font-semibold capitalize ${
-                    state.kernel.direction === 'bullish'
-                      ? 'text-bull-400'
-                      : state.kernel.direction === 'bearish'
-                      ? 'text-bear-400'
-                      : 'text-steel-400'
-                  }`}>
-                    {state.kernel.direction}
-                  </p>
-                </div>
-                <div className="space-y-0.5">
-                  <p className="text-[11px] text-steel-500">Trend Filter (-0.1)</p>
-                  <p className={`text-sm font-semibold ${
-                    state.kernel.trendFilterPassed ? 'text-bull-400' : 'text-bear-400'
-                  }`}>
-                    {state.kernel.trendFilterPassed ? 'Passed' : 'Blocked'}
-                  </p>
-                </div>
+            <div className="rounded-lg border border-ink-600/40 bg-ink-900/20 p-4">
+              <div className="flex items-center justify-between border-b border-ink-700/40 pb-2 mb-3">
+                <span className="text-xs font-medium text-steel-400">AI Narrative Analysis</span>
+                <span className="text-[11px] text-steel-500">
+                  Computed at {state.computedAt.toLocaleTimeString()}
+                </span>
               </div>
-
-              {/* Trend Filter Signal Marker */}
-              <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ${
-                  ? 'bg-bull-500/10 border border-bull-500/30 text-bull-300'
-                  : 'bg-bear-500/10 border border-bear-500/30 text-bear-300'
-              }`}>
-                <span className={`h-2 w-2 rounded-full shrink-0 ${
-                  state.kernel.trendFilterPassed ? 'bg-bull-400' : 'bg-bear-400'
-                }`} />
-                {state.kernel.trendFilterPassed
-                  ? 'Trend filter clear - kernel signal active'
-                  : 'Trend filter blocked - regime below -0.1 threshold'}
-              </div>
-            </div>
-
-            {/* 1:3 Position Marker Card */}
-            <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
-              <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
-                Position Marker · 1:3 Risk/Reward
-              </p>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-steel-400">Take Profit</span>
-                  <span className="font-mono text-bull-300">
-                    {state.marker.takeProfit.toFixed(5)}
-                  </span>
-                </div>
-                <div className="relative h-px bg-ink-700/60 mx-1">
-                  <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bull-400" />
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-steel-400">Entry</span>
-                  <span className="font-mono text-slate-200">
-                    {state.marker.entry.toFixed(5)}
-                  </span>
-                </div>
-                <div className="relative h-px bg-ink-700/60 mx-1">
-                  <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bear-400" />
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className="text-steel-400">Stop Loss</span>
-                  <span className="font-mono text-bear-300">
-                    {state.marker.stopLoss.toFixed(5)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex justify-between text-[11px] text-steel-500 pt-1 border-t border-ink-700/40">
-                <span>Risk: {state.marker.riskAmount.toFixed(5)}</span>
-                <span>Reward: {state.marker.rewardAmount.toFixed(5)}</span>
-                <span className="text-steel-300 font-semibold">Ratio 1:3</span>
-              </div>
-            </div>
-
-            {/* AI Analysis Card */}
-            <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 overflow-y-auto max-h-[480px]">
-              <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
+              <p className="text-sm text-slate-200 whitespace-pre-line leading-relaxed">
                 {state.analysis}
               </p>
-              <p className="text-[11px] text-steel-500 mt-3 pt-3 border-t border-ink-700/40">
-                Generated {state.computedAt.toLocaleTimeString()}
-              </p>
             </div>
 
+            {/* Metric Blocks */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-lg border border-ink-600/40 bg-ink-900/20 p-3">
+                <span className="text-[11px] text-steel-500 block mb-1">Kernel Trend</span>
+                <span className="text-sm font-semibold capitalize text-slate-200">
+                  {state.kernel.direction}
+                </span>
+              </div>
+              <div className="rounded-lg border border-ink-600/40 bg-ink-900/20 p-3">
+                <span className="text-[11px] text-steel-500 block mb-1">Position Marker</span>
+                <span className="text-sm font-semibold capitalize text-slate-200">
+                  {state.marker}
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
