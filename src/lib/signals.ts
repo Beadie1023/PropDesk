@@ -246,3 +246,103 @@ export function combineSignals(
   if (l === 'bearish' || c === 'bearish') return 'sell';
   return 'neutral';
 }
+// --- Nadaraya-Watson Kernel Regression ---
+
+const KERNEL_H = 8; // Lookback Window
+const KERNEL_R = 8; // Relative Weighting
+const KERNEL_X0 = 25; // Regression Level
+const KERNEL_LAG = 2; // Lag
+
+function rationalQuadraticKernel(
+ candles: Candle,
+ h: number,
+ r: number,
+ x0: number,
+): number {
+ const n = candles.length;
+ const closes = candles.map((c) => c.close);
+ const estimates: number[] = [];
+
+ for (let i = 0; i < n; i++) {
+ let weightSum = 0;
+ let valueSum = 0;
+ for (let j = 0; j <= Math.min(i, x0 - 1); j++) {
+ const w = Math.pow(1 + (j  j) / (2  r  h  h), -r);
+ weightSum += w;
+ valueSum += w  closes[i - j];
+ }
+ estimates.push(valueSum / weightSum);
+ }
+
+ return estimates;
+}
+
+export type KernelResult = {
+ estimate: number; // current smoothed price
+ laggedEstimate: number; // lagged estimate for crossover detection
+ direction: 'bullish' | 'bearish' | 'neutral';
+ trendFilterPassed: boolean; // regime filter at -0.1 threshold
+};
+
+export function computeKernelRegression(candles: Candle): KernelResult {
+ if (candles.length < KERNEL_X0 + KERNEL_LAG) {
+ return {
+ estimate: candles[candles.length - 1]?.close ?? 0,
+ laggedEstimate: candles[candles.length - 1]?.close ?? 0,
+ direction: 'neutral',
+ trendFilterPassed: false,
+ };
+ }
+
+ const estimates = rationalQuadraticKernel(candles, KERNEL_H, KERNEL_R, KERNEL_X0);
+ const last = estimates[estimates.length - 1];
+ const lagged = estimates[estimates.length - 1 - KERNEL_LAG];
+ const prev = estimates[estimates.length - 2];
+
+ // Trend detection filter - threshold -0.1
+ const trendValue = last - prev;
+ const trendFilterPassed = trendValue > -0.1;
+
+ const direction =
+ last > lagged ? 'bullish' : last < lagged ? 'bearish' : 'neutral';
+
+ return {
+ estimate: last,
+ laggedEstimate: lagged,
+ direction,
+ trendFilterPassed,
+ };
+}
+
+// 1:3 risk/reward position marker
+export type PositionMarker = {
+ entry: number;
+ stopLoss: number;
+ takeProfit: number;
+ riskAmount: number;
+ rewardAmount: number;
+ ratio: '1:3';
+};
+
+export function computePositionMarker(
+ entry: number,
+ direction: 'bullish' | 'bearish',
+ stopPips: number = 0.0024, // default stop distance for GBP/AUD
+): PositionMarker {
+ const riskAmount = stopPips;
+ const rewardAmount = stopPips  3;
+
+ const stopLoss =
+ direction === 'bullish' ? entry - riskAmount : entry + riskAmount;
+ const takeProfit =
+ direction === 'bullish' ? entry + rewardAmount : entry - rewardAmount;
+
+ return {
+ entry,
+ stopLoss,
+ takeProfit,
+ riskAmount,
+ rewardAmount,
+ ratio: '1:3',
+ };
+}
