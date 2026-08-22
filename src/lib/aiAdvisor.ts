@@ -1,113 +1,93 @@
-// Thin client for the AI Market Advisor backend endpoint.
-import { API_BASE as METAAPI_BASE, apiHeaders } from '@/lib/metaapi';
-import type { Candle } from '@/lib/marketData';
-import type { CurrencyStrengthResult, LorentzianSignal } from '@/lib/signals';
+// AI market analysis — calls the Gemini API server-side (free tier).
+// GEMINI_API_KEY stays here, never in the frontend (same reasoning as the
+// MetaApi token: a VITE_-prefixed key would be bundled into public JS and
+// anyone loading the site could use up your free-tier quota).
+//
+// This is framed honestly to the end user as an AI-generated technical
+// read of the visible price data — not a claim of verified professional
+// credentials or a profitable track record, since it has neither. It never
+// recommends a specific trade size, and every response should reinforce
+// that this supports manual review, not automated execution (Upcomers
+// doesn't permit EA trading on this account).
 
-const AI_API_BASE =
-  import.meta.env.VITE_AI_BACKEND_URL ||
-  (METAAPI_BASE.endsWith('/api/metaapi')
-    ? METAAPI_BASE.replace(/\/api\/metaapi$/, '/api/ai')
-    : '/api/ai');
+const GEMINI_MODEL = 'gemini-3.6-flash';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-export type AIAnalysisResult =
-  | { status: 'ok'; analysis: string }
-  | { status: 'error'; message: string };
+const SYSTEM_PROMPT = `You are a technical market analysis assistant embedded in a personal trading journal app called PropDesk. You analyze recent GBP/AUD price action and indicator readings the app provides you, and give the trader a clear, honest read of what the chart is showing.
 
-export function buildAnalysisPayload(
-  candles: Candle[],
-  lorentzian: LorentzianSignal | null,
-  currencyStrength: CurrencyStrengthResult | null,
-) {
-  const closes = candles.map((c) => c.close);
-  const current = closes[closes.length - 1];
-  const dayAgoIdx = Math.max(0, closes.length - 25);
-  const weekAgoIdx = Math.max(0, closes.length - 121);
-  const dayAgo = closes[dayAgoIdx];
-  const weekAgo = closes[weekAgoIdx];
+Ground rules:
+- You are an AI reading patterns in recent price data, not a professional trader, financial advisor, or verified authority. Never claim credentials, a track record, or certainty you don't have.
+- Describe what the data shows (trend, momentum, volatility, key levels, how the two computed indicators agree or disagree) in plain language.
+- Never tell the trader to place a specific trade, size, or timing — describe the situation and let them decide. This account does not permit automated execution; a human places every trade.
+- Flag disagreement or low-confidence signals honestly rather than picking a side to sound decisive.
+- Keep it concise: a short read of current conditions, not a long report.
+- This is not financial advice, and you should say so briefly if the trader appears to be treating your read as a guarantee.`;
 
-  const recentWindow = candles.slice(-48);
-  const recentHigh = recentWindow.length
-    ? Math.max(...recentWindow.map((c) => c.high))
-    : current;
-  const recentLow = recentWindow.length
-    ? Math.min(...recentWindow.map((c) => c.low))
-    : current;
-
-  return {
-    pair: 'GBP/AUD',
-    currentPrice: current,
-    changeLast24hPercent: dayAgo ? ((current - dayAgo) / dayAgo) * 100 : null,
-    changeLast5dPercent: weekAgo ? ((current - weekAgo) / weekAgo) * 100 : null,
-    recentHigh48h: recentHigh,
-    recentLow48h: recentLow,
-    lorentzianClassification: lorentzian
-      ? {
-          direction: lorentzian.direction,
-          confidencePercent: lorentzian.confidence * 100,
-        }
-      : null,
-    currencyStrength: currencyStrength
-      ? {
-          direction: currencyStrength.direction,
-          gbpScore: currencyStrength.gbpScore,
-          audScore: currencyStrength.audScore,
-        }
-      : null,
-  };
-}
-
-export async function analyzeMarket(
-  candles: Candle[],
-  lorentzian: LorentzianSignal | null,
-  currencyStrength: CurrencyStrengthResult | null,
-): Promise<AIAnalysisResult> {
-  try {
-    const payload = buildAnalysisPayload(candles, lorentzian, currencyStrength);
-    const res = await fetch(`${AI_API_BASE}/analyze`, {
-      method: 'POST',
-      headers: apiHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload),
-    });
-
-    const rawText = await res.text();
-
-    if (!rawText) {
-      return {
-        status: 'error',
-        message: `Backend returned an empty response (status ${res.status}). If the backend has been idle, it may be waking up — try again in ~30 seconds.`,
-      };
-    }
-
-    let data: { message?: string; analysis?: string };
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      return {
-        status: 'error',
-        message: `Backend returned a non-JSON response (status ${res.status}): ${rawText.slice(0, 150)}`,
-      };
-    }
-
-    if (!res.ok) {
-      return {
-        status: 'error',
-        message: data.message ?? `Analysis request failed with status ${res.status}`,
-      };
-    }
-
-    if (typeof data.analysis !== 'string') {
-      return {
-        status: 'error',
-        message: 'Unexpected response shape from analysis backend.',
-      };
-    }
-
-    return { status: 'ok', analysis: data.analysis };
-  } catch (err) {
-    console.error('AI market analysis failed:', err);
-    return {
-      status: 'error',
-      message: err instanceof Error ? err.message : 'Unknown error',
-    };
+/**
+ * Calls Gemini to analyze recent price/indicator data. `payload` is a
+ * plain-language summary object built by the caller (not raw candle
+ * arrays — keeps requests small and keeps the analysis focused on what
+ * actually matters).
+ */
+export async function analyzeMarket(payload) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not set in the server environment.');
   }
+
+  const userMessage = `Here's the current GBP/AUD market data:\n\n${JSON.stringify(payload, null, 2)}\n\nGive me a short read on current conditions.`;
+
+  const response = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      system_instruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: userMessage }],
+        },
+      ],
+      generationConfig: {
+        // gemini-3.6-flash is in the "Gemini 3" family, which uses
+        // thinkingLevel (not thinkingBudget, which is Gemini 2.5-only) and
+        // can't fully disable thinking. "low" minimizes reasoning-token
+        // usage. maxOutputTokens is raised well above the actual answer
+        // length needed, since thinking tokens count against this same
+        // budget — too low a cap was cutting the visible answer off
+        // mid-sentence after thinking consumed most of it.
+        thinkingConfig: {
+          thinkingLevel: 'low',
+        },
+        maxOutputTokens: 2048,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Gemini API request failed with status ${response.status}: ${errorBody.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  if (typeof text !== 'string' || text.length === 0) {
+    // A common non-error case: the response was blocked by safety
+    // filters or truncated for hitting maxOutputTokens before any text
+    // was produced — surface that distinctly rather than a generic
+    // "unexpected shape" message.
+    const finishReason = data?.candidates?.[0]?.finishReason;
+    if (finishReason) {
+      throw new Error(`Gemini did not return text (finishReason: ${finishReason}).`);
+    }
+    throw new Error('Gemini API returned an unexpected response shape.');
+  }
+
+  return text;
 }
