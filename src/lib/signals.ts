@@ -10,7 +10,7 @@ export type LorentzianSignal = {
  bearishCount: number;
 };
 
-function rsi(closes: number, period: number): number {
+function rsi(closes: number[], period: number): number {
  if (closes.length < period + 1) return 50;
  let gains = 0;
  let losses = 0;
@@ -23,7 +23,7 @@ function rsi(closes: number, period: number): number {
  return 100 - 100 / (1 + rs);
 }
 
-function cci(candles: Candle, period: number): number {
+function cci(candles: Candle[], period: number): number {
  if (candles.length < period) return 0;
  const slice = candles.slice(-period);
  const typicals = slice.map((c) => (c.high + c.low + c.close) / 3);
@@ -32,7 +32,7 @@ function cci(candles: Candle, period: number): number {
  return (typicals[typicals.length - 1] - mean) / (0.015 * (meanDev || 1));
 }
 
-function adx(candles: Candle, period: number): number {
+function adx(candles: Candle[], period: number): number {
  if (candles.length < period + 1) return 0;
  const slice = candles.slice(-(period + 1));
  let plusDM = 0;
@@ -41,8 +41,8 @@ function adx(candles: Candle, period: number): number {
  for (let i = 1; i < slice.length; i++) {
  const high = slice[i].high - slice[i - 1].high;
  const low = slice[i - 1].low - slice[i].low;
- plusDM += high > low && high > 0? high : 0;
- minusDM += low > high && low > 0? low : 0;
+ plusDM += high > low && high > 0 ? high : 0;
+ minusDM += low > high && low > 0 ? low : 0;
  trSum += Math.max(
  slice[i].high - slice[i].low,
  Math.abs(slice[i].high - slice[i - 1].close),
@@ -55,7 +55,7 @@ function adx(candles: Candle, period: number): number {
  return dx;
 }
 
-function wt(closes: number, channelLen: number, avgLen: number): number {
+function wt(closes: number[], channelLen: number, avgLen: number): number {
  if (closes.length < channelLen + avgLen) return 0;
  const slice = closes.slice(-channelLen);
  const esa = slice.reduce((a, b) => a + b, 0) / channelLen;
@@ -64,11 +64,11 @@ function wt(closes: number, channelLen: number, avgLen: number): number {
  return ci;
 }
 
-function lorentzianDistance(a: number, b: number): number {
+function lorentzianDistance(a: number[], b: number[]): number {
  return a.reduce((sum, val, i) => sum + Math.log(1 + Math.abs(val - b[i])), 0);
 }
 
-export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
+export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal {
  if (candles.length < 50) {
  return {
  direction: 'neutral',
@@ -90,7 +90,7 @@ export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
  rsi(closes, 9),
  ];
 
- const distances: Array<{ dist: number; label: 'bullish' | 'bearish' }> = ;
+ const distances: Array<{ dist: number; label: 'bullish' | 'bearish' }> = [];
 
  for (let i = 20; i < candles.length - 1; i++) {
  const historicalCloses = closes.slice(0, i + 1);
@@ -103,7 +103,7 @@ export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
  rsi(historicalCloses, 9),
  ];
  const dist = lorentzianDistance(currentFeatures, features);
- const label = closes[i + 1] > closes[i]? 'bullish' : 'bearish';
+ const label = closes[i + 1] > closes[i] ? 'bullish' : 'bearish';
  distances.push({ dist, label });
  }
 
@@ -113,9 +113,9 @@ export function computeLorentzianSignal(candles: Candle): LorentzianSignal {
  const bearishCount = nearest.filter((n) => n.label === 'bearish').length;
  const direction =
  bullishCount > bearishCount
-? 'bullish'
+ ? 'bullish'
  : bearishCount > bullishCount
-? 'bearish'
+ ? 'bearish'
  : 'neutral';
  const confidence = Math.max(bullishCount, bearishCount) / NEIGHBORS;
 
@@ -136,7 +136,7 @@ export type CurrencyStrengthResult = {
 };
 
 export function computeCurrencyStrength(
- candles: Candle,
+ candles: Candle[],
  lookback: number = 20,
 ): CurrencyStrengthResult {
  if (candles.length < lookback + 1) {
@@ -166,14 +166,14 @@ const KERNEL_LAG = 2;
 const TREND_FILTER_THRESHOLD = -0.1;
 
 function rationalQuadraticKernel(
- candles: Candle,
+ candles: Candle[],
  h: number,
  r: number,
  x0: number,
-): number {
+): number[] {
  const n = candles.length;
  const closes = candles.map((c) => c.close);
- const estimates: number = ;
+ const estimates: number[] = [];
 
  for (let i = 0; i < n; i++) {
  let weightSum = 0;
@@ -197,11 +197,11 @@ export type KernelResult = {
  trendValue: number;
 };
 
-export function computeKernelRegression(candles: Candle): KernelResult {
+export function computeKernelRegression(candles: Candle[]): KernelResult {
  if (candles.length < KERNEL_X0 + KERNEL_LAG) {
  return {
- estimate: candles[candles.length - 1]?.close?? 0,
- laggedEstimate: candles[candles.length - 1]?.close?? 0,
+ estimate: candles[candles.length - 1]?.close ?? 0,
+ laggedEstimate: candles[candles.length - 1]?.close ?? 0,
  direction: 'neutral',
  trendFilterPassed: false,
  trendValue: 0,
@@ -216,7 +216,7 @@ export function computeKernelRegression(candles: Candle): KernelResult {
  const trendValue = last - prev;
  const trendFilterPassed = trendValue > TREND_FILTER_THRESHOLD;
  const direction =
- last > lagged? 'bullish' : last < lagged? 'bearish' : 'neutral';
+ last > lagged ? 'bullish' : last < lagged ? 'bearish' : 'neutral';
 
  return {
  estimate: last,
@@ -239,6 +239,8 @@ export type PositionMarker = {
  riskAmount: number;
  rewardAmount: number;
  ratio: '1:3';
+ price: number;
+ type: 'bullish' | 'bearish';
 };
 
 export function computePositionMarker(
@@ -250,9 +252,9 @@ export function computePositionMarker(
  const rewardAmount = stopPips * RR_RATIO;
 
  const stopLoss =
- direction === 'bullish'? entry - riskAmount : entry + riskAmount;
+ direction === 'bullish' ? entry - riskAmount : entry + riskAmount;
  const takeProfit =
- direction === 'bullish'? entry + rewardAmount : entry - rewardAmount;
+ direction === 'bullish' ? entry + rewardAmount : entry - rewardAmount;
 
  return {
  entry,
@@ -261,5 +263,7 @@ export function computePositionMarker(
  riskAmount,
  rewardAmount,
  ratio: '1:3',
+ price: entry,
+ type: direction,
  };
 }
