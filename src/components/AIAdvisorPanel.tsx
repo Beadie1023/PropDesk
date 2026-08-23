@@ -210,7 +210,6 @@ export function AIAdvisorPanel() {
 
  {state.status === 'ok' && (
  <div className="space-y-4">
-
  <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
  <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
  Nadaraya-Watson Kernel Regression
@@ -233,9 +232,9 @@ export function AIAdvisorPanel() {
  <p className="text-[11px] text-steel-500">Direction</p>
  <p className={`text-sm font-semibold capitalize ${
  state.kernel.direction === 'bullish'
-? 'text-bull-400'
+ ? 'text-bull-400'
  : state.kernel.direction === 'bearish'
-? 'text-bear-400'
+ ? 'text-bear-400'
  : 'text-steel-400'
  }`}>
  {state.kernel.direction}
@@ -252,69 +251,34 @@ export function AIAdvisorPanel() {
  </div>
 
  <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ${
-? 'bg-bull-500/10 border border-bull-500/30 text-bull-300'
- : 'bg-bear-500/10 border border-bear-500/30 text-bear-300'
+ state.kernel.direction === 'bullish'
+ ? 'bg-bull-500/10 text-bull-400'
+ : state.kernel.direction === 'bearish'
+ ? 'bg-bear-500/10 text-bear-400'
+ : 'bg-steel-500/10 text-steel-400'
  }`}>
- <span className={`h-2 w-2 rounded-full shrink-0 ${
- state.kernel.trendFilterPassed ? 'bg-bull-400' : 'bg-bear-400'
- }`} />
- {state.kernel.trendFilterPassed
-? 'Trend filter clear - kernel signal active'
- : 'Trend filter blocked - regime below -0.1 threshold'}
+ <span className="font-semibold uppercase tracking-wide text-[10px]">
+ Position Marker:
+ </span>
+ <span className="font-mono">
+ {state.marker.price.toFixed(5)} ({state.marker.type})
+ </span>
  </div>
  </div>
 
- <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
+ <div className="rounded-lg border border-ink-600/40 bg-ink-900/20 p-4 space-y-2">
  <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
- Position Marker · 1:3 Risk/Reward
+ AI Market Read
  </p>
-
- <div className="space-y-2">
- <div className="flex justify-between items-center text-xs">
- <span className="text-steel-400">Take Profit</span>
- <span className="font-mono text-bull-300">
- {state.marker.takeProfit.toFixed(5)}
- </span>
- </div>
- <div className="relative h-px bg-ink-700/60 mx-1">
- <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bull-400" />
- </div>
- <div className="flex justify-between items-center text-xs">
- <span className="text-steel-400">Entry</span>
- <span className="font-mono text-slate-200">
- {state.marker.entry.toFixed(5)}
- </span>
- </div>
- <div className="relative h-px bg-ink-700/60 mx-1">
- <div className="absolute right-0 -top-1 h-2 w-2 rounded-full bg-bear-400" />
- </div>
- <div className="flex justify-between items-center text-xs">
- <span className="text-steel-400">Stop Loss</span>
- <span className="font-mono text-bear-300">
- {state.marker.stopLoss.toFixed(5)}
- </span>
- </div>
- </div>
-
- <div className="flex justify-between text-[11px] text-steel-500 pt-1 border-t border-ink-700/40">
- <span>Risk: {state.marker.riskAmount.toFixed(5)}</span>
- <span>Reward: {state.marker.rewardAmount.toFixed(5)}</span>
- <span className="text-steel-300 font-semibold">Ratio 1:3</span>
- </div>
- </div>
-
- <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 overflow-y-auto max-h-[480px]">
- <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
+ <div className="text-sm text-steel-200 whitespace-pre-wrap leading-relaxed">
  {state.analysis}
- </p>
- <p className="text-[11px] text-steel-500 mt-3 pt-3 border-t border-ink-700/40">
- Generated {state.computedAt.toLocaleTimeString()}
+ </div>
+ <p className="text-[10px] text-steel-500 pt-2 text-right">
+ Computed at: {state.computedAt.toLocaleTimeString()}
  </p>
  </div>
-
  </div>
  )}
-
  </div>
  </Panel>
  );
