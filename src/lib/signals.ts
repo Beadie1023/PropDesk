@@ -1,9 +1,5 @@
 import type { Candle } from '@/lib/marketData';
 
-// --- Currency Strength Pairs ---
-
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'GBP/JPY', 'AUD/USD', 'AUD/JPY'] as const;
-
 // --- Lorentzian Classification ---
 
 export type LorentzianSignal = {
@@ -132,72 +128,33 @@ export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal {
   };
 }
 
-// --- Currency Strength ---
+// --- Currency Strength (GBP/AUD only) ---
 
 export type CurrencyStrengthResult = {
-  GBP: number;
-  AUD: number;
   direction: 'bullish' | 'bearish' | 'neutral';
   gbpScore: number;
   audScore: number;
 };
 
 export function computeCurrencyStrength(
-  candles: Candle[] | Partial<Record<string, Candle[]>>,
+  candles: Candle[],
   lookback: number = 20,
 ): CurrencyStrengthResult {
-  // Handle both single candle array and object of candle arrays
-  let priceChange: number;
-
-  if (Array.isArray(candles)) {
-    // Single pair (GBP/AUD) case
-    if (candles.length < lookback + 1) {
-      return { GBP: 50, AUD: 50, direction: 'neutral', gbpScore: 50, audScore: 50 };
-    }
-
-    const recent = candles.slice(-(lookback + 1));
-    const start = recent[0].close;
-    const end = recent[recent.length - 1].close;
-    priceChange = (end - start) / start;
-  } else {
-    // Multiple pairs case (for basket)
-    const gbpPairs = Object.entries(candles)
-      .filter(([symbol]) => symbol.startsWith('GBP'))
-      .map(([_, c]) => c)
-      .filter((c) => c && c.length > 0) as Candle[][];
-
-    const audPairs = Object.entries(candles)
-      .filter(([symbol]) => symbol.startsWith('AUD'))
-      .map(([_, c]) => c)
-      .filter((c) => c && c.length > 0) as Candle[][];
-
-    if (gbpPairs.length === 0 || audPairs.length === 0) {
-      return { GBP: 50, AUD: 50, direction: 'neutral', gbpScore: 50, audScore: 50 };
-    }
-
-    // Simple average of GBP strength vs AUD strength
-    const gbpStrengths = gbpPairs.map((c) => {
-      if (c.length < lookback + 1) return 0;
-      const recent = c.slice(-(lookback + 1));
-      return (recent[recent.length - 1].close - recent[0].close) / recent[0].close;
-    });
-
-    const audStrengths = audPairs.map((c) => {
-      if (c.length < lookback + 1) return 0;
-      const recent = c.slice(-(lookback + 1));
-      return (recent[recent.length - 1].close - recent[0].close) / recent[0].close;
-    });
-
-    const avgGbpChange = gbpStrengths.reduce((a, b) => a + b, 0) / gbpStrengths.length;
-    const avgAudChange = audStrengths.reduce((a, b) => a + b, 0) / audStrengths.length;
-
-    priceChange = avgGbpChange - avgAudChange;
+  // Single pair (GBP/AUD) only
+  if (candles.length < lookback + 1) {
+    return { direction: 'neutral', gbpScore: 50, audScore: 50 };
   }
 
+  const recent = candles.slice(-(lookback + 1));
+  const start = recent[0].close;
+  const end = recent[recent.length - 1].close;
+  const pctChange = (end - start) / start;
+
+  // GBP/AUD rising means GBP strengthening against AUD, and vice versa
   const normalize = (val: number) => Math.min(100, Math.max(0, 50 + val * 5000));
 
-  const gbpScore = normalize(priceChange);
-  const audScore = normalize(-priceChange);
+  const gbpScore = normalize(pctChange);
+  const audScore = normalize(-pctChange);
 
   const direction =
     gbpScore > audScore + 5
@@ -207,8 +164,6 @@ export function computeCurrencyStrength(
         : 'neutral';
 
   return {
-    GBP: gbpScore,
-    AUD: audScore,
     direction,
     gbpScore,
     audScore,
