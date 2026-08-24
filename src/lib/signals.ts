@@ -164,12 +164,12 @@ export function computeCurrencyStrength(
     const gbpPairs = Object.entries(candles)
       .filter(([symbol]) => symbol.startsWith('GBP'))
       .map(([_, c]) => c)
-      .filter((c) => c && c.length > 0);
+      .filter((c) => c && c.length > 0) as Candle[][];
 
     const audPairs = Object.entries(candles)
       .filter(([symbol]) => symbol.startsWith('AUD'))
       .map(([_, c]) => c)
-      .filter((c) => c && c.length > 0);
+      .filter((c) => c && c.length > 0) as Candle[][];
 
     if (gbpPairs.length === 0 || audPairs.length === 0) {
       return { GBP: 50, AUD: 50, direction: 'neutral', gbpScore: 50, audScore: 50 };
