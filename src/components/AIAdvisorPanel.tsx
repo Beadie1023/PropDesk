@@ -232,9 +232,9 @@ export function AIAdvisorPanel() {
  <p className="text-[11px] text-steel-500">Direction</p>
  <p className={`text-sm font-semibold capitalize ${
  state.kernel.direction === 'bullish'
- ? 'text-bull-400'
+? 'text-bull-400'
  : state.kernel.direction === 'bearish'
- ? 'text-bear-400'
+? 'text-bear-400'
  : 'text-steel-400'
  }`}>
  {state.kernel.direction}
@@ -249,20 +249,38 @@ export function AIAdvisorPanel() {
  </p>
  </div>
  </div>
+ </div>
 
- <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium ${
- state.kernel.direction === 'bullish'
- ? 'bg-bull-500/10 text-bull-400'
- : state.kernel.direction === 'bearish'
- ? 'bg-bear-500/10 text-bear-400'
- : 'bg-steel-500/10 text-steel-400'
- }`}>
- <span className="font-semibold uppercase tracking-wide text-[10px]">
- Position Marker:
+ <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
+ <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
+ Position Marker · 1:3 Risk/Reward
+ </p>
+
+ <div className="space-y-2">
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Take Profit</span>
+ <span className="font-mono text-bull-300">
+ {state.marker.takeProfit.toFixed(5)}
  </span>
- <span className="font-mono">
- {state.marker.price.toFixed(5)} ({state.marker.type})
+ </div>
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Entry</span>
+ <span className="font-mono text-slate-200 font-semibold">
+ {state.marker.entry.toFixed(5)}
  </span>
+ </div>
+ <div className="flex justify-between items-center text-xs">
+ <span className="text-steel-400">Stop Loss</span>
+ <span className="font-mono text-bear-300">
+ {state.marker.stopLoss.toFixed(5)}
+ </span>
+ </div>
+ </div>
+
+ <div className="flex justify-between text-[11px] text-steel-500 pt-2 border-t border-ink-700/40">
+ <span>Risk: {state.marker.riskAmount.toFixed(5)}</span>
+ <span>Reward: {state.marker.rewardAmount.toFixed(5)}</span>
+ <span className="text-steel-300 font-semibold">Ratio {state.marker.ratio}</span>
  </div>
  </div>
 
