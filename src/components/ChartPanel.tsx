@@ -119,8 +119,7 @@ function toChartData(candles: Candle[]) {
 
 const RESISTANCE_COLOR = '#f87171';
 const SUPPORT_COLOR = '#4ade80';
-const KERNEL_BULLISH_COLOR = '#22d3ee';
-const KERNEL_BEARISH_COLOR = '#f59e0b';
+const KERNEL_COLOR = '#22d3ee';
 const ENTRY_COLOR = '#e2e8f0';
 const TREND_FILTER_THRESHOLD = -0.1;
 const RISK_REWARD_RATIO = 3; // 1:3 — SL distance × 3 = TP distance
@@ -137,23 +136,14 @@ export function ChartPanel() {
   const [loading, setLoading] = useState(true);
   const [usingSampleData, setUsingSampleData] = useState(false);
 
-  // Draws the kernel regression trend line from RAW candles with color
-  // that changes based on trend direction: cyan for bullish, amber for bearish
+  // Draws the kernel regression trend line from RAW candles — same
+  // reasoning as support/resistance: this should reflect real price
+  // smoothing, not a second layer of smoothing on top of Heikin Ashi.
   function drawKernelRegression(rawCandles: Candle[]) {
     const kernelSeries = kernelSeriesRef.current;
     if (!kernelSeries) return;
 
     const points = computeKernelRegression(rawCandles);
-    
-    // Determine trend direction for color
-    const lastResult = points[points.length - 1];
-    const kernelColor = lastResult.direction === 'bullish' 
-      ? KERNEL_BULLISH_COLOR 
-      : lastResult.direction === 'bearish'
-        ? KERNEL_BEARISH_COLOR
-        : '#888888';
-
-    kernelSeries.applyOptions({ color: kernelColor });
     kernelSeries.setData(points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
   }
 
@@ -288,15 +278,10 @@ export function ChartPanel() {
       borderDownColor: '#f87171',
       wickUpColor: '#4ade80',
       wickDownColor: '#f87171',
-      priceFormat: {
-        type: 'price',
-        precision: 5,
-        minMove: 0.00001,
-      },
     });
 
     const kernelSeries = chart.addSeries(LineSeries, {
-      color: KERNEL_BULLISH_COLOR,
+      color: KERNEL_COLOR,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
