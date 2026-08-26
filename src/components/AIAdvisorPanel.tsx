@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { AlertTriangle, Bot, Loader2, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { Panel } from '@/components/ui';
-import { fetchTwelveDataCandles } from '@/lib/marketData';
+import { fetchCandlesSequential, fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 import {
   computeCurrencyStrength,
   computeLorentzianSignal,
   computeKernelRegression,
   computePositionMarker,
+  CURRENCY_STRENGTH_PAIRS,
+  type CurrencyStrengthPair,
   type KernelResult,
   type PositionMarker,
 } from '@/lib/signals';
@@ -53,15 +55,27 @@ export function AIAdvisorPanel() {
     setState({ status: 'loading' });
     try {
       const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+      const basket = await fetchCandlesSequential(
+        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+      );
+      const candlesByPair: Partial<Record<CurrencyStrengthPair, Candle[]>> = {};
+      CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
+        candlesByPair[symbol] = basket[i];
+      });
 
       const lorentzian = computeLorentzianSignal(gbpaud);
-      const currencyStrength = computeCurrencyStrength(gbpaud);
+      const currencyStrength = computeCurrencyStrength(candlesByPair);
       const kernel = computeKernelRegression(gbpaud);
-      const lastClose = gbpaud[gbpaud.length - 1].close;
+      if (!kernel) {
+        throw new Error('Not enough candle history to compute a kernel regression yet.');
+      }
       const marker = computePositionMarker(
-        lastClose,
+        gbpaud,
         kernel.direction === 'neutral' ? 'bearish' : kernel.direction,
       );
+      if (!marker) {
+        throw new Error('Not enough candle history to size a position marker yet.');
+      }
 
       const result: AIAnalysisResult = await analyzeMarket(gbpaud, lorentzian, currencyStrength);
 
