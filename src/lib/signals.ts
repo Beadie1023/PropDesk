@@ -1,11 +1,18 @@
-// Backend signal computation for the poller. Mirrors src/lib/signals.ts
-// (frontend) exactly, including the tanh-based currency strength scaling
-// fix — kept as a separate plain-JS copy since the backend has no
-// TypeScript build step. If you change the algorithm on one side, update
-// the other to match, or the two panels and the phone notifications could
-// disagree with each other.
+// Frontend signal computation. The backend poller keeps a separate plain-JS
+// copy at server/lib/signals.js for the Lorentzian + currency-strength math
+// (it has no TypeScript build step) — if you change that algorithm here,
+// update the backend copy to match, or the panels and the phone
+// notifications could disagree with each other. Everything below that
+// point (kernel regression / position marker) is frontend-only display
+// logic and has no backend counterpart.
 
-function computeRSI(closes, period) {
+import type { Candle } from './marketData';
+import { computeKernelRegression as computeKernelPoints } from './kernelRegression';
+import { computeATR, computeTrendFilter } from './trendFilter';
+
+export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
+
+function computeRSI(closes: number[], period: number): number[] {
   const rsi = new Array(closes.length).fill(NaN);
   if (closes.length <= period) return rsi;
 
@@ -31,7 +38,7 @@ function computeRSI(closes, period) {
   return rsi;
 }
 
-function computeROC(closes, period) {
+function computeROC(closes: number[], period: number): number[] {
   const roc = new Array(closes.length).fill(NaN);
   for (let i = period; i < closes.length; i++) {
     const past = closes[i - period];
@@ -40,7 +47,7 @@ function computeROC(closes, period) {
   return roc;
 }
 
-function lorentzianDistance(a, b) {
+function lorentzianDistance(a: number[], b: number[]): number {
   let sum = 0;
   for (let i = 0; i < a.length; i++) {
     sum += Math.log(1 + Math.abs(a[i] - b[i]));
@@ -53,7 +60,13 @@ const K_NEIGHBORS = 20;
 const BULLISH_THRESHOLD = 60;
 const BEARISH_THRESHOLD = 40;
 
-export function computeLorentzianSignal(candles) {
+export type LorentzianSignal = {
+  direction: SignalDirection;
+  confidence: number;
+  nearestBars: number;
+};
+
+export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | null {
   const MIN_CANDLES = 60;
   if (candles.length < MIN_CANDLES) return null;
 
@@ -62,7 +75,7 @@ export function computeLorentzianSignal(candles) {
   const rsi9 = computeRSI(closes, 9);
   const roc10 = computeROC(closes, 10);
 
-  const points = [];
+  const points: { features: number[]; label: number }[] = [];
   const minIdx = 15;
   const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
 
@@ -89,24 +102,25 @@ export function computeLorentzianSignal(candles) {
   const bullishVotes = neighbors.filter((n) => n.label === 1).length;
   const confidence = (bullishVotes / neighbors.length) * 100;
 
-  let direction = 'neutral';
+  let direction: SignalDirection = 'neutral';
   if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
   else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
 
-  return { direction, confidence, neighborsUsed: neighbors.length };
+  return { direction, confidence, nearestBars: neighbors.length };
 }
 
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/USD', 'USD/JPY'];
+export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD'] as const;
+export type CurrencyStrengthPair = (typeof CURRENCY_STRENGTH_PAIRS)[number];
 
 const STRENGTH_LOOKBACK_BARS = 24;
 const STRENGTH_DIFFERENTIAL_THRESHOLD = 10;
 const TYPICAL_DAILY_MOVE_PERCENT = 0.3;
 
-function scoreFromChange(changePercent) {
+function scoreFromChange(changePercent: number): number {
   return 50 + 50 * Math.tanh(changePercent / TYPICAL_DAILY_MOVE_PERCENT);
 }
 
-function pctChangeOverLookback(candles) {
+function pctChangeOverLookback(candles: Candle[]): number | null {
   if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
   const recent = candles[candles.length - 1].close;
   const past = candles[candles.length - 1 - STRENGTH_LOOKBACK_BARS].close;
@@ -114,13 +128,20 @@ function pctChangeOverLookback(candles) {
   return ((recent - past) / past) * 100;
 }
 
-export function computeCurrencyStrength(candlesByPair) {
+export type CurrencyStrengthResult = {
+  gbpScore: number;
+  audScore: number;
+  differential: number;
+  direction: SignalDirection;
+};
+
+export function computeCurrencyStrength(
+  candlesByPair: Partial<Record<CurrencyStrengthPair, Candle[]>>,
+): CurrencyStrengthResult | null {
   const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] || []);
   const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] || []);
-  const eurusd = pctChangeOverLookback(candlesByPair['EUR/USD'] || []);
-  const usdjpy = pctChangeOverLookback(candlesByPair['USD/JPY'] || []);
 
-  if (gbpusd === null || audusd === null || eurusd === null || usdjpy === null) {
+  if (gbpusd === null || audusd === null) {
     return null;
   }
 
@@ -128,14 +149,19 @@ export function computeCurrencyStrength(candlesByPair) {
   const audScore = scoreFromChange(audusd);
   const differential = gbpScore - audScore;
 
-  let direction = 'neutral';
+  let direction: SignalDirection = 'neutral';
   if (differential >= STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bullish';
   else if (differential <= -STRENGTH_DIFFERENTIAL_THRESHOLD) direction = 'bearish';
 
   return { gbpScore, audScore, differential, direction };
 }
 
-export function combineSignals(lorentzian, currencyStrength) {
+export type OverallSignal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'conflicting';
+
+export function combineSignals(
+  lorentzian: LorentzianSignal | null,
+  currencyStrength: CurrencyStrengthResult | null,
+): OverallSignal {
   if (!lorentzian || !currencyStrength) return 'neutral';
 
   const l = lorentzian.direction;
@@ -147,4 +173,70 @@ export function combineSignals(lorentzian, currencyStrength) {
   if (l === 'bullish' || c === 'bullish') return 'buy';
   if (l === 'bearish' || c === 'bearish') return 'sell';
   return 'neutral';
+}
+
+// --- Kernel regression + position marker -----------------------------------
+// Wraps the raw Nadaraya-Watson estimate from ./kernelRegression with the
+// same trend-filter gating ChartPanel already draws on the chart, so the
+// AI Advisor panel's numbers match what's actually shown on the candles.
+
+const TREND_FILTER_THRESHOLD = -0.1;
+const TREND_FILTER_LOOKBACK = 20;
+const RISK_REWARD_RATIO = 3; // 1:3 — matches ChartPanel's SL/TP sizing
+
+export type KernelResult = {
+  estimate: number;
+  laggedEstimate: number;
+  direction: SignalDirection;
+  trendFilterPassed: boolean;
+};
+
+export function computeKernelRegression(candles: Candle[]): KernelResult | null {
+  const points = computeKernelPoints(candles);
+  if (points.length === 0) return null;
+
+  const last = points[points.length - 1];
+  const estimate = last.rawValue;
+  const laggedEstimate = last.value;
+
+  let direction: SignalDirection = 'neutral';
+  if (estimate > laggedEstimate) direction = 'bullish';
+  else if (estimate < laggedEstimate) direction = 'bearish';
+
+  const trend = computeTrendFilter(candles, TREND_FILTER_LOOKBACK, TREND_FILTER_THRESHOLD);
+  const trendFilterPassed = trend?.trending ?? false;
+
+  return { estimate, laggedEstimate, direction, trendFilterPassed };
+}
+
+export type PositionMarker = {
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
+  riskAmount: number;
+  rewardAmount: number;
+  ratio: number;
+};
+
+export function computePositionMarker(
+  candles: Candle[],
+  direction: Exclude<SignalDirection, 'neutral'>,
+  riskRewardRatio: number = RISK_REWARD_RATIO,
+): PositionMarker | null {
+  const atr = computeATR(candles, 14);
+  if (!atr || atr <= 0 || candles.length === 0) return null;
+
+  const entry = candles[candles.length - 1].close;
+  const isBullish = direction === 'bullish';
+  const stopLoss = isBullish ? entry - atr : entry + atr;
+  const takeProfit = isBullish ? entry + atr * riskRewardRatio : entry - atr * riskRewardRatio;
+
+  return {
+    entry,
+    stopLoss,
+    takeProfit,
+    riskAmount: Math.abs(entry - stopLoss),
+    rewardAmount: Math.abs(takeProfit - entry),
+    ratio: riskRewardRatio,
+  };
 }
