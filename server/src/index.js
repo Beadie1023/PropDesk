@@ -4,6 +4,7 @@ import express from 'express';
 import cors from 'cors';
 import { connectAccount, getAccountInfo, placeOrder, isConnected } from './metaapiClient.js';
 import { analyzeMarket } from './aiAdvisor.js';
+import { startSignalPolling } from './lib/signalPoller.js';
 
 const app = express();
 
@@ -166,4 +167,5 @@ connectOnStartup().finally(() => {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`PropDesk MetaApi backend listening on port ${PORT}`);
   });
+  startSignalPolling();
 });
