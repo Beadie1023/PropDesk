@@ -122,6 +122,11 @@ const SUPPORT_COLOR = '#4ade80';
 const ENTRY_COLOR = '#e2e8f0';
 const TREND_FILTER_THRESHOLD = -0.1;
 const RISK_REWARD_RATIO = 3; // 1:3 — SL distance × 3 = TP distance
+// Bars back to compare when deciding the kernel line's color — matches
+// computeKernelRegression's default `lookback` (its own smoothing
+// window), so color changes track sustained moves rather than
+// per-bar noise. See drawKernelRegression for why this isn't 1.
+const KERNEL_COLOR_SPAN = 8;
 
 export function ChartPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -146,10 +151,18 @@ export function ChartPanel() {
 
     const points = computeKernelRegression(rawCandles);
 
-    // Colors the line by the plotted (lagged) line's own slope, bar to
-    // bar — this is the segment users actually see, not the unlagged
-    // estimate. Two overlapping series (green/red) simulate a single
-    // color-changing line; on a direction change, the prior point is
+    // Colors the line by the plotted (lagged) line's own slope, but
+    // compared across KERNEL_COLOR_SPAN bars rather than just the
+    // previous bar — comparing bar-to-bar is sensitive enough to normal
+    // price noise that it flips direction every few bars (tested at
+    // ~1 flip per 6 bars), which reads as clutter rather than a trend
+    // change. Comparing across the same window the kernel itself uses
+    // to smooth (KERNEL_LOOKBACK) cuts that roughly in half and tracks
+    // sustained moves instead of noise.
+    //
+    // Two overlapping series (green/red) simulate a single color-
+    // changing line, since lightweight-charts line series can't change
+    // color mid-line; on a direction change, the prior point is
     // duplicated into the new segment so the two colors meet without a
     // visual gap.
     const upData: { time: UTCTimestamp; value: number }[] = [];
@@ -157,8 +170,10 @@ export function ChartPanel() {
     let prevDir: 'up' | 'down' | null = null;
 
     points.forEach((p, i) => {
+      if (i < KERNEL_COLOR_SPAN) return;
+
       const time = p.time as UTCTimestamp;
-      const dir: 'up' | 'down' = i === 0 || p.value >= points[i - 1].value ? 'up' : 'down';
+      const dir: 'up' | 'down' = p.value >= points[i - KERNEL_COLOR_SPAN].value ? 'up' : 'down';
       const target = dir === 'up' ? upData : downData;
 
       if (prevDir !== null && dir !== prevDir) {
