@@ -20,6 +20,8 @@ import { SignalPanel } from '@/components/SignalPanel';
 import { AIAdvisorPanel } from '@/components/AIAdvisorPanel';
 import { ConsistencyPanel } from '@/components/ConsistencyPanel';
 
+import type { TradeSetupPrefill } from '@/types';
+
 type View = 'overview' | 'calculator' | 'payouts' | 'accounts' | 'risk' | 'journal';
 
 const NAV: { key: View; label: string; icon: typeof Activity }[] = [
@@ -35,6 +37,7 @@ function App() {
   const { accounts, trades, loading, error, addTrade, deleteTrade, importTrades } =
     usePropDeskData();
   const [view, setView] = useState<View>('overview');
+  const [tradeSetupPrefill, setTradeSetupPrefill] = useState<TradeSetupPrefill | null>(null);
 
   const portfolioBalance = useMemo(
     () => accounts.reduce((s, a) => s + a.balance, 0),
@@ -151,7 +154,7 @@ function App() {
               <TradeCalculator accounts={accounts} />
               <RiskAlertPanel accounts={accounts} trades={trades} />
             </div>
-            <ChartPanel />
+            <ChartPanel onLogTradeSetup={setTradeSetupPrefill} />
             <SignalPanel />
             <AIAdvisorPanel />
             <ConsistencyPanel accounts={accounts} trades={trades} />
@@ -162,6 +165,8 @@ function App() {
               onAddTrade={addTrade}
               onDeleteTrade={deleteTrade}
               onImportTrades={importTrades}
+              setupPrefill={tradeSetupPrefill}
+              onSetupPrefillConsumed={() => setTradeSetupPrefill(null)}
             />
           </div>
         )}
