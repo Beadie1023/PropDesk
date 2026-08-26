@@ -49,6 +49,20 @@ export type RiskStatus = 'green' | 'yellow' | 'red';
 
 export type RRKey = '1:2' | '1:3' | '1:4';
 
+// Captured from the chart's live position marker when the "Log This
+// Trade" button is clicked — prefills the journal's Add Trade form.
+// Result/P&L aren't included since those aren't known yet at entry;
+// the trader fills those in once the trade closes.
+export type TradeSetupPrefill = {
+  pair: string;
+  direction: 'long' | 'short';
+  entry_price: number;
+  sl: number;
+  tp1: number;
+  rr_used: RRKey;
+  trade_date: string;
+};
+
 export type PayoutEstimate = {
   accountId: string;
   accountName: string;
