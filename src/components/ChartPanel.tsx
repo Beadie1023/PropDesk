@@ -13,13 +13,14 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { Loader2, LineChart } from 'lucide-react';
+import { Loader2, LineChart, Target } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 import { computeSupportResistance } from '@/lib/levels';
 import { computeKernelRegression } from '@/lib/kernelRegression';
 import { computeATR, computeTrendFilter } from '@/lib/trendFilter';
 import { computeLorentzianSignal } from '@/lib/signals';
+import type { TradeSetupPrefill } from '@/types';
 
 // This chart is hardcoded to a single pair — no selector.
 const PAIR = 'GBPAUD';
@@ -128,7 +129,11 @@ const RISK_REWARD_RATIO = 3; // 1:3 — SL distance × 3 = TP distance
 // per-bar noise. See drawKernelRegression for why this isn't 1.
 const KERNEL_COLOR_SPAN = 8;
 
-export function ChartPanel() {
+export function ChartPanel({
+  onLogTradeSetup,
+}: {
+  onLogTradeSetup?: (setup: TradeSetupPrefill) => void;
+} = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -140,6 +145,10 @@ export function ChartPanel() {
 
   const [loading, setLoading] = useState(true);
   const [usingSampleData, setUsingSampleData] = useState(false);
+  // The setup currently drawn on the chart (entry/SL/TP + direction),
+  // kept in sync with drawPositionMarker below. Null whenever trend
+  // filter + Lorentzian don't agree, i.e. nothing to log.
+  const [activeSetup, setActiveSetup] = useState<TradeSetupPrefill | null>(null);
 
   // Draws the kernel regression trend line from RAW candles — same
   // reasoning as support/resistance: this should reflect real price
@@ -235,11 +244,15 @@ export function ChartPanel() {
     const trend = computeTrendFilter(rawCandles, 20, TREND_FILTER_THRESHOLD);
 
     if (!lorentzian || !trend || !trend.trending || lorentzian.direction === 'neutral') {
+      setActiveSetup(null);
       return;
     }
 
     const atr = computeATR(rawCandles, 14);
-    if (!atr || atr <= 0) return;
+    if (!atr || atr <= 0) {
+      setActiveSetup(null);
+      return;
+    }
 
     const lastCandle = rawCandles[rawCandles.length - 1];
     const isBullish = lorentzian.direction === 'bullish';
@@ -247,6 +260,16 @@ export function ChartPanel() {
     const slDistance = atr;
     const sl = isBullish ? entry - slDistance : entry + slDistance;
     const tp = isBullish ? entry + slDistance * RISK_REWARD_RATIO : entry - slDistance * RISK_REWARD_RATIO;
+
+    setActiveSetup({
+      pair: PAIR_LABEL,
+      direction: isBullish ? 'long' : 'short',
+      entry_price: entry,
+      sl,
+      tp1: tp,
+      rr_used: `1:${RISK_REWARD_RATIO}` as TradeSetupPrefill['rr_used'],
+      trade_date: new Date().toISOString().slice(0, 10),
+    });
 
     const entryLine = series.createPriceLine({
       price: entry,
@@ -402,6 +425,23 @@ export function ChartPanel() {
           : 'Heikin Ashi candles + support/resistance — live 1H data from Twelve Data'
       }
       icon={<LineChart className="h-5 w-5" />}
+      action={
+        onLogTradeSetup && (
+          <button
+            onClick={() => activeSetup && onLogTradeSetup(activeSetup)}
+            disabled={!activeSetup}
+            title={
+              activeSetup
+                ? `Log ${activeSetup.direction.toUpperCase()} @ ${activeSetup.entry_price.toFixed(5)}`
+                : 'No active setup — trend filter and Lorentzian signal must agree'
+            }
+            className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Target className="h-4 w-4" />
+            Log This Trade
+          </button>
+        )
+      }
     >
       <div className="p-5">
         <div className="relative w-full h-[400px]">
