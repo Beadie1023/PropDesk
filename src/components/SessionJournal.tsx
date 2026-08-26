@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
@@ -14,7 +14,7 @@ import {
 import { Panel } from '@/components/ui';
 import { RR_OPTIONS, formatCurrency, formatPrice } from '@/lib/trading';
 import { parseMT5Csv, type ParsedImportResult } from '@/lib/csvImport';
-import type { Account, Trade } from '@/types';
+import type { Account, Trade, TradeSetupPrefill } from '@/types';
 
 export function SessionJournal({
   trades,
@@ -22,16 +22,26 @@ export function SessionJournal({
   onAddTrade,
   onDeleteTrade,
   onImportTrades,
+  setupPrefill,
+  onSetupPrefillConsumed,
 }: {
   trades: Trade[];
   accounts: Account[];
   onAddTrade: (trade: Omit<Trade, 'id'>) => Promise<void>;
   onDeleteTrade: (id: string) => Promise<void>;
   onImportTrades: (trades: Omit<Trade, 'id'>[], accountId: string) => Promise<void>;
+  // Set when the trader clicks "Log This Trade" on the chart — opens
+  // the Add Trade form pre-filled with the setup shown there.
+  setupPrefill?: TradeSetupPrefill | null;
+  onSetupPrefillConsumed?: () => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [importResult, setImportResult] = useState<ParsedImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (setupPrefill) setShowForm(true);
+  }, [setupPrefill]);
 
   const stats = useMemo(() => {
     const wins = trades.filter((t) => t.result === 'win');
@@ -253,10 +263,15 @@ export function SessionJournal({
       {showForm && (
         <AddTradeModal
           accounts={accounts}
-          onClose={() => setShowForm(false)}
+          prefill={setupPrefill}
+          onClose={() => {
+            setShowForm(false);
+            onSetupPrefillConsumed?.();
+          }}
           onSubmit={async (trade) => {
             await onAddTrade(trade);
             setShowForm(false);
+            onSetupPrefillConsumed?.();
           }}
         />
       )}
@@ -452,14 +467,29 @@ const EMPTY_FORM = {
 
 function AddTradeModal({
   accounts,
+  prefill,
   onClose,
   onSubmit,
 }: {
   accounts: Account[];
+  prefill?: TradeSetupPrefill | null;
   onClose: () => void;
   onSubmit: (trade: Omit<Trade, 'id'>) => Promise<void>;
 }) {
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [form, setForm] = useState(() =>
+    prefill
+      ? {
+          ...EMPTY_FORM,
+          trade_date: prefill.trade_date,
+          pair: prefill.pair,
+          direction: prefill.direction,
+          rr_used: prefill.rr_used,
+          entry_price: prefill.entry_price.toFixed(5),
+          sl: prefill.sl.toFixed(5),
+          tp1: prefill.tp1.toFixed(5),
+        }
+      : { ...EMPTY_FORM },
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
@@ -523,6 +553,16 @@ function AddTradeModal({
         </div>
 
         <div className="p-6 space-y-5">
+          {prefill && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3.5">
+              <Target className="h-4 w-4 text-accent-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-accent-300 leading-relaxed">
+                Pre-filled from the chart's active setup. Come back and fill in{' '}
+                <span className="font-semibold">Result</span> and{' '}
+                <span className="font-semibold">P&amp;L</span> once the trade closes.
+              </p>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-4">
             <Field label="Date">
               <input
