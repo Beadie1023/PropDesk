@@ -119,7 +119,6 @@ function toChartData(candles: Candle[]) {
 
 const RESISTANCE_COLOR = '#f87171';
 const SUPPORT_COLOR = '#4ade80';
-const KERNEL_COLOR = '#22d3ee';
 const ENTRY_COLOR = '#e2e8f0';
 const TREND_FILTER_THRESHOLD = -0.1;
 const RISK_REWARD_RATIO = 3; // 1:3 — SL distance × 3 = TP distance
@@ -128,7 +127,8 @@ export function ChartPanel() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const kernelSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const kernelUpSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const kernelDownSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const positionLinesRef = useRef<IPriceLine[]>([]);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
@@ -140,11 +140,37 @@ export function ChartPanel() {
   // reasoning as support/resistance: this should reflect real price
   // smoothing, not a second layer of smoothing on top of Heikin Ashi.
   function drawKernelRegression(rawCandles: Candle[]) {
-    const kernelSeries = kernelSeriesRef.current;
-    if (!kernelSeries) return;
+    const upSeries = kernelUpSeriesRef.current;
+    const downSeries = kernelDownSeriesRef.current;
+    if (!upSeries || !downSeries) return;
 
     const points = computeKernelRegression(rawCandles);
-    kernelSeries.setData(points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
+
+    // Colors the line by the plotted (lagged) line's own slope, bar to
+    // bar — this is the segment users actually see, not the unlagged
+    // estimate. Two overlapping series (green/red) simulate a single
+    // color-changing line; on a direction change, the prior point is
+    // duplicated into the new segment so the two colors meet without a
+    // visual gap.
+    const upData: { time: UTCTimestamp; value: number }[] = [];
+    const downData: { time: UTCTimestamp; value: number }[] = [];
+    let prevDir: 'up' | 'down' | null = null;
+
+    points.forEach((p, i) => {
+      const time = p.time as UTCTimestamp;
+      const dir: 'up' | 'down' = i === 0 || p.value >= points[i - 1].value ? 'up' : 'down';
+      const target = dir === 'up' ? upData : downData;
+
+      if (prevDir !== null && dir !== prevDir) {
+        const prev = points[i - 1];
+        target.push({ time: prev.time as UTCTimestamp, value: prev.value });
+      }
+      target.push({ time, value: p.value });
+      prevDir = dir;
+    });
+
+    upSeries.setData(upData);
+    downSeries.setData(downData);
   }
 
   // Redraws support/resistance lines, clearing any previously drawn ones
@@ -278,10 +304,19 @@ export function ChartPanel() {
       borderDownColor: '#f87171',
       wickUpColor: '#4ade80',
       wickDownColor: '#f87171',
+      priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
     });
 
-    const kernelSeries = chart.addSeries(LineSeries, {
-      color: KERNEL_COLOR,
+    const kernelUpSeries = chart.addSeries(LineSeries, {
+      color: SUPPORT_COLOR,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+
+    const kernelDownSeries = chart.addSeries(LineSeries, {
+      color: RESISTANCE_COLOR,
       lineWidth: 2,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -292,14 +327,16 @@ export function ChartPanel() {
 
     chartRef.current = chart;
     seriesRef.current = series;
-    kernelSeriesRef.current = kernelSeries;
+    kernelUpSeriesRef.current = kernelUpSeries;
+    kernelDownSeriesRef.current = kernelDownSeries;
     markersPluginRef.current = markersPlugin;
 
     return () => {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
-      kernelSeriesRef.current = null;
+      kernelUpSeriesRef.current = null;
+      kernelDownSeriesRef.current = null;
       markersPluginRef.current = null;
       priceLinesRef.current = [];
       positionLinesRef.current = [];
