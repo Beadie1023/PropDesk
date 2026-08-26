@@ -16,7 +16,8 @@ export type KernelRegressionOptions = {
 
 export type KernelPoint = {
   time: number;
-  value: number;
+  value: number; // lag-shifted estimate (unchanged existing behavior)
+  rawValue: number; // pre-lag estimate, for callers that need the un-shifted line
 };
 
 /**
@@ -70,5 +71,5 @@ export function computeKernelRegression(candles: Candle[], options: KernelRegres
   // them undefined.
   const lagged: number[] = estimates.map((_, i) => estimates[Math.max(0, i - lag)]);
 
-  return candles.map((c, i) => ({ time: c.time, value: lagged[i] }));
+  return candles.map((c, i) => ({ time: c.time, value: lagged[i], rawValue: estimates[i] }));
 }
