@@ -96,7 +96,7 @@ export function computeLorentzianSignal(candles) {
   return { direction, confidence, neighborsUsed: neighbors.length };
 }
 
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/USD', 'USD/JPY'];
+export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD'];
 
 const STRENGTH_LOOKBACK_BARS = 24;
 const STRENGTH_DIFFERENTIAL_THRESHOLD = 10;
@@ -117,10 +117,8 @@ function pctChangeOverLookback(candles) {
 export function computeCurrencyStrength(candlesByPair) {
   const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] || []);
   const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] || []);
-  const eurusd = pctChangeOverLookback(candlesByPair['EUR/USD'] || []);
-  const usdjpy = pctChangeOverLookback(candlesByPair['USD/JPY'] || []);
 
-  if (gbpusd === null || audusd === null || eurusd === null || usdjpy === null) {
+  if (gbpusd === null || audusd === null) {
     return null;
   }
 
