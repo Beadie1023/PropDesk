@@ -14,7 +14,7 @@ import {
 import { Panel } from '@/components/ui';
 import { RR_OPTIONS, formatCurrency, formatPrice } from '@/lib/trading';
 import { parseMT5Csv, type ParsedImportResult } from '@/lib/csvImport';
-import type { Account, Trade, TradeSetupPrefill } from '@/types';
+import type { Account, OrderType, Trade, TradeSetupPrefill } from '@/types';
 
 export function SessionJournal({
   trades,
@@ -460,9 +460,17 @@ const EMPTY_FORM = {
   tp1: '',
   tp2: '',
   result: 'win' as 'win' | 'loss',
-  dollar_amount: '',
+  dollar_amount: '', // gross P&L, before commission/swap
+  commission: '', // optional — negative for a fee, e.g. -0.05
+  swap: '', // optional — can be positive or negative
   notes: '',
   account_name: '',
+  // Optional — power the Order Types / Intraday / Duration stats.
+  // Left blank, these trades just get excluded from those specific
+  // breakdowns rather than skewing them.
+  order_type: '' as '' | OrderType,
+  entry_time: '', // HH:MM, paired with trade_date to build open_time
+  exit_time: '', // HH:MM, paired with trade_date to build close_time
 };
 
 function AddTradeModal({
@@ -506,6 +514,24 @@ function AddTradeModal({
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
+    // Combine the trade date with the optional HH:MM time-of-day inputs
+    // into full ISO datetimes — same shape the MT5 importer produces —
+    // so manually-logged trades can feed Intraday/Duration stats too.
+    // Left undefined when no time was entered, not defaulted to
+    // midnight, so those trades are correctly excluded rather than
+    // silently miscounted into the 00:00 hour.
+    const open_time = form.entry_time ? `${form.trade_date}T${form.entry_time}:00Z` : undefined;
+    const close_time = form.exit_time ? `${form.trade_date}T${form.exit_time}:00Z` : undefined;
+
+    const commission = form.commission ? parseFloat(form.commission) : 0;
+    const swap = form.swap ? parseFloat(form.swap) : 0;
+    // dollar_amount is the account's actual balance impact (gross P&L +
+    // commission + swap) — matching upcomers.com's Balance line, not
+    // just the raw Profit line — so this figure reconciles with the
+    // broker statement and every downstream stat (drawdown, consistency,
+    // payout estimate) reflects real account movement.
+    const balanceImpact = parseFloat(form.dollar_amount) + commission + swap;
+
     await onSubmit({
       trade_date: form.trade_date,
       pair: form.pair.trim().toUpperCase(),
@@ -516,9 +542,14 @@ function AddTradeModal({
       tp1: parseFloat(form.tp1),
       tp2: parseFloat(form.tp2),
       result: form.result,
-      dollar_amount: parseFloat(form.dollar_amount),
+      dollar_amount: balanceImpact,
       notes: form.notes.trim(),
       account_name: form.account_name,
+      order_type: form.order_type || undefined,
+      commission: form.commission ? commission : undefined,
+      swap: form.swap ? swap : undefined,
+      open_time,
+      close_time,
     });
     setSubmitting(false);
   };
@@ -617,6 +648,37 @@ function AddTradeModal({
                 ))}
               </div>
             </Field>
+            <Field label="Order Type (optional)">
+              <select
+                value={form.order_type}
+                onChange={(e) => set('order_type', e.target.value as typeof form.order_type)}
+                className="input-field"
+              >
+                <option value="">— Unspecified —</option>
+                <option value="market">Market</option>
+                <option value="limit">Limit</option>
+                <option value="stop">Stop</option>
+              </select>
+            </Field>
+            <Field label="Entry Time (optional)">
+              <input
+                type="time"
+                value={form.entry_time}
+                onChange={(e) => set('entry_time', e.target.value)}
+                className="input-field"
+              />
+            </Field>
+            <Field label="Exit Time (optional)">
+              <input
+                type="time"
+                value={form.exit_time}
+                onChange={(e) => set('exit_time', e.target.value)}
+                className="input-field"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4">
             <Field label="R:R Used">
               <select
                 value={form.rr_used}
@@ -649,7 +711,7 @@ function AddTradeModal({
                 ))}
               </div>
             </Field>
-            <Field label="P&L ($)">
+            <Field label="Gross P&L ($)">
               <input
                 type="number"
                 step="0.01"
@@ -661,6 +723,47 @@ function AddTradeModal({
                 }`}
               />
             </Field>
+            <Field label="Commission (optional)">
+              <input
+                type="number"
+                step="0.01"
+                value={form.commission}
+                onChange={(e) => set('commission', e.target.value)}
+                placeholder="-0.05"
+                className="input-field"
+              />
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-4 gap-4">
+            <Field label="Swap (optional)">
+              <input
+                type="number"
+                step="0.01"
+                value={form.swap}
+                onChange={(e) => set('swap', e.target.value)}
+                placeholder="0.00"
+                className="input-field"
+              />
+            </Field>
+            {(form.commission || form.swap) && form.dollar_amount && (
+              <div className="col-span-3 flex items-center justify-between rounded-lg bg-ink-900/60 border border-ink-700/40 px-4">
+                <span className="text-xs text-steel-400">
+                  Balance Impact (Gross + Commission + Swap) — this is what gets saved
+                </span>
+                <span
+                  className={`stat-value text-sm font-bold ${
+                    parseFloat(form.dollar_amount) + (parseFloat(form.commission) || 0) + (parseFloat(form.swap) || 0) >= 0
+                      ? 'text-bull-400'
+                      : 'text-bear-400'
+                  }`}
+                >
+                  {formatCurrency(
+                    parseFloat(form.dollar_amount) + (parseFloat(form.commission) || 0) + (parseFloat(form.swap) || 0),
+                  )}
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-4 gap-4">
