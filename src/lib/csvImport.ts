@@ -1,4 +1,4 @@
-import type { Trade } from '@/types';
+import type { OrderType, Trade } from '@/types';
 
 export type ParsedMT5Trade = Omit<Trade, 'id' | 'account_name'>;
 
@@ -190,10 +190,18 @@ export function parseMT5Csv(text: string): ParsedImportResult {
       skippedRows++;
       continue;
     }
-    if (!['buy', 'sell', 'long', 'short'].includes(rawType)) {
+    // MT5's Type column is "buy"/"sell" for market fills, or
+    // "buy limit"/"sell stop"/etc. for orders that started pending and
+    // were later triggered. Match on the buy/sell prefix so both are
+    // accepted, and derive order_type from whether "limit"/"stop"
+    // appears rather than discarding those rows.
+    const isBuy = /^(buy|long)\b/.test(rawType);
+    const isSell = /^(sell|short)\b/.test(rawType);
+    if (!isBuy && !isSell) {
       skippedRows++;
       continue;
     }
+    const orderType: OrderType = rawType.includes('limit') ? 'limit' : rawType.includes('stop') ? 'stop' : 'market';
 
     const symbol = cells[colMap.symbol!] ?? '';
     const profit = parseNumericCell(cells[colMap.profit!]);
@@ -222,7 +230,7 @@ export function parseMT5Csv(text: string): ParsedImportResult {
       continue;
     }
 
-    const direction: 'long' | 'short' = rawType === 'sell' || rawType === 'short' ? 'short' : 'long';
+    const direction: 'long' | 'short' = isSell ? 'short' : 'long';
     const validOpen = Number.isFinite(openPrice) ? openPrice : 0;
     const validClose = Number.isFinite(closePrice) ? closePrice : validOpen;
 
@@ -241,6 +249,7 @@ export function parseMT5Csv(text: string): ParsedImportResult {
       close_price: Number.isFinite(closePrice) ? closePrice : undefined,
       lots: Number.isFinite(volume) ? volume : undefined,
       source: 'mt5_import',
+      order_type: orderType,
       commission: Number.isFinite(commission) ? commission : undefined,
       swap: Number.isFinite(swap) ? swap : undefined,
       open_time: normalizeDateTime(openTimeRaw) ?? undefined,
