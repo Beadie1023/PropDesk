@@ -19,6 +19,7 @@ import { ChartPanel } from '@/components/ChartPanel';
 import { SignalPanel } from '@/components/SignalPanel';
 import { AIAdvisorPanel } from '@/components/AIAdvisorPanel';
 import { ConsistencyPanel } from '@/components/ConsistencyPanel';
+import { TradeAnalyticsPanel } from '@/components/TradeAnalyticsPanel';
 
 import type { TradeSetupPrefill } from '@/types';
 
@@ -168,6 +169,7 @@ function App() {
               setupPrefill={tradeSetupPrefill}
               onSetupPrefillConsumed={() => setTradeSetupPrefill(null)}
             />
+            <TradeAnalyticsPanel accounts={accounts} trades={trades} />
           </div>
         )}
 
@@ -182,13 +184,16 @@ function App() {
         {view === 'risk' && <RiskAlertPanel accounts={accounts} trades={trades} />}
 
         {view === 'journal' && (
-          <SessionJournal
-            trades={trades}
-            accounts={accounts}
-            onAddTrade={addTrade}
-            onDeleteTrade={deleteTrade}
-            onImportTrades={importTrades}
-          />
+          <div className="space-y-6">
+            <SessionJournal
+              trades={trades}
+              accounts={accounts}
+              onAddTrade={addTrade}
+              onDeleteTrade={deleteTrade}
+              onImportTrades={importTrades}
+            />
+            <TradeAnalyticsPanel accounts={accounts} trades={trades} />
+          </div>
         )}
       </main>
 
