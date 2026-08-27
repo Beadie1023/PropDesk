@@ -18,6 +18,8 @@ export type Account = {
   pipValue: number;
 };
 
+export type OrderType = 'market' | 'limit' | 'stop';
+
 export type Trade = {
   id: string;
   trade_date: string;
@@ -35,12 +37,17 @@ export type Trade = {
   close_price?: number;
   lots?: number;
   source?: 'manual' | 'mt5_import';
+  // How the entry was triggered. Optional — older trades (logged before
+  // this field existed) won't have it, and Order Types stats should
+  // treat those as "unknown" rather than assuming market.
+  order_type?: OrderType;
   // Broker-side costs, from MT5's Commission/Swap columns. Undefined for
   // manually-logged trades (no fee data available for those).
   commission?: number;
   swap?: number;
-  // Full ISO datetimes, when available (MT5 CSV imports only — manual
-  // entries have no time-of-day). Needed to compute hold duration.
+  // Full ISO datetimes, when available (MT5 CSV imports, or manually
+  // entered if the trader fills the optional time fields). Needed to
+  // compute hold duration and time-of-day stats.
   open_time?: string;
   close_time?: string;
 };
