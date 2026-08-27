@@ -1,80 +1,572 @@
-export type Account = {
-  id: string;
-  name: string;
-  firm: string;
-  type: string;
-  balance: number;
-  startingBalance: number;
-  highWaterMark: number;
-  floorBalance: number;
-  maxDrawdownPercent: number;
-  profitSplit: number;
-  minTradingDays: number;
-  consistencyLimit: number;
-  phase: string;
-  startDate: string;
-  status: 'active' | 'inactive' | 'breached';
-  lots: number;
-  pipValue: number;
+import type { Account, OrderType, PayoutEstimate, RRKey, RiskStatus, Trade } from '@/types';
+
+export const PIP = 0.0001;
+
+export const RR_OPTIONS: RRKey[] = ['1:2', '1:3', '1:4'];
+
+export const rrRatio = (rr: RRKey): number => {
+  const map: Record<RRKey, number> = { '1:2': 2, '1:3': 3, '1:4': 4 };
+  return map[rr];
 };
 
-export type OrderType = 'market' | 'limit' | 'stop';
+export const roundToPip = (value: number): number => {
+  const decimals = value >= 100 ? 2 : 4;
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+};
 
-export type Trade = {
-  id: string;
-  trade_date: string;
-  pair: string;
-  direction: 'long' | 'short';
-  rr_used: string;
-  entry_price: number;
+export const formatPrice = (value: number): string => {
+  return value.toFixed(value >= 100 ? 2 : 4);
+};
+
+export const formatCurrency = (value: number): string => {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+export const formatCurrencyShort = (value: number): string => {
+  const sign = value < 0 ? '-' : '';
+  const abs = Math.abs(value);
+  if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
+  return `${sign}$${abs.toFixed(0)}`;
+};
+
+export const formatPercent = (value: number): string => {
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(1)}%`;
+};
+
+export type CalcResult = {
   sl: number;
   tp1: number;
   tp2: number;
-  result: 'win' | 'loss';
-  dollar_amount: number;
-  notes: string;
-  account_name: string;
-  close_price?: number;
-  lots?: number;
-  source?: 'manual' | 'mt5_import';
-  // How the entry was triggered. Optional — older trades (logged before
-  // this field existed) won't have it, and Order Types stats should
-  // treat those as "unknown" rather than assuming market.
-  order_type?: OrderType;
-  // Broker-side costs, from MT5's Commission/Swap columns. Undefined for
-  // manually-logged trades (no fee data available for those).
-  commission?: number;
-  swap?: number;
-  // Full ISO datetimes, when available (MT5 CSV imports, or manually
-  // entered if the trader fills the optional time fields). Needed to
-  // compute hold duration and time-of-day stats.
-  open_time?: string;
-  close_time?: string;
+  tp3: number;
+  pipDistanceSL: number;
+  pipDistanceTP1: number;
+  pipDistanceTP2: number;
+  pipDistanceTP3: number;
+  perAccount: {
+    account: Account;
+    winAtTP1: number;
+    winAtTP2: number;
+    winAtTP3: number;
+    lossAtSL: number;
+    rrMultiple: number;
+  }[];
+  totalWin: number;
+  totalLoss: number;
 };
 
-export type RiskStatus = 'green' | 'yellow' | 'red';
+export const calculateTrade = (
+  entryPrice: number,
+  rr: RRKey,
+  accounts: Account[],
+): CalcResult => {
+  const ratio = rrRatio(rr);
+  const sl = roundToPip(entryPrice - 10 * PIP);
+  const tp1 = roundToPip(entryPrice + 20 * PIP);
+  const tp2 = roundToPip(entryPrice + 30 * PIP);
+  const tp3 = roundToPip(entryPrice + 40 * PIP);
 
-export type RRKey = '1:2' | '1:3' | '1:4';
+  const pipDistanceSL = 10;
+  const pipDistanceTP1 = 20;
+  const pipDistanceTP2 = 30;
+  const pipDistanceTP3 = 40;
 
-// Captured from the chart's live position marker when the "Log This
-// Trade" button is clicked — prefills the journal's Add Trade form.
-// Result/P&L aren't included since those aren't known yet at entry;
-// the trader fills those in once the trade closes.
-export type TradeSetupPrefill = {
-  pair: string;
-  direction: 'long' | 'short';
-  entry_price: number;
-  sl: number;
-  tp1: number;
-  rr_used: RRKey;
-  trade_date: string;
+  const perAccount = accounts.map((account) => {
+    const winAtTP1 = pipDistanceTP1 * account.pipValue;
+    const winAtTP2 = pipDistanceTP2 * account.pipValue;
+    const winAtTP3 = pipDistanceTP3 * account.pipValue;
+    const lossAtSL = pipDistanceSL * account.pipValue;
+    const rrMultiple = ratio;
+    return { account, winAtTP1, winAtTP2, winAtTP3, lossAtSL, rrMultiple };
+  });
+
+  const totalWin = perAccount.reduce((sum, a) => sum + a.winAtTP3, 0);
+  const totalLoss = perAccount.reduce((sum, a) => sum + a.lossAtSL, 0);
+
+  return {
+    sl,
+    tp1,
+    tp2,
+    tp3,
+    pipDistanceSL,
+    pipDistanceTP1,
+    pipDistanceTP2,
+    pipDistanceTP3,
+    perAccount,
+    totalWin,
+    totalLoss,
+  };
 };
 
-export type PayoutEstimate = {
-  accountId: string;
+/**
+ * Live drawdown floor — Upcomers computes this as a TRAILING stop-out
+ * line (highWaterMark × (1 - maxDrawdownPercent/100)), recalculated as
+ * the high-water mark grows. Confirmed against the real account: HWM
+ * $2,002.44 × 0.96 = $1,922.34, matching Upcomers' displayed limit
+ * exactly. account.floorBalance is kept only as the account's *initial*
+ * floor at seed time — this function is the one that reflects reality.
+ */
+export const currentFloorBalance = (account: Account): number =>
+  account.highWaterMark * (1 - account.maxDrawdownPercent / 100);
+
+/**
+ * Drawdown risk is measured against the account's floor balance (the stop-out
+ * line), relative to the buffer between the high-water mark and that floor.
+ */
+export const riskStatus = (account: Account): RiskStatus => {
+  const floor = currentFloorBalance(account);
+  if (account.balance <= floor) return 'red';
+  const totalBuffer = account.highWaterMark - floor;
+  if (totalBuffer <= 0) return 'green';
+  const used = account.highWaterMark - account.balance;
+  const usedRatio = used / totalBuffer;
+  if (usedRatio >= 0.75) return 'yellow';
+  return 'green';
+};
+
+export const drawdownPct = (account: Account): number => {
+  const floor = currentFloorBalance(account);
+  const totalBuffer = account.highWaterMark - floor;
+  if (totalBuffer <= 0) return 0;
+  const used = Math.max(account.highWaterMark - account.balance, 0);
+  return Math.min(used / totalBuffer, 1) * 100;
+};
+
+export const drawdownBufferRemaining = (account: Account): number =>
+  Math.max(account.balance - currentFloorBalance(account), 0);
+
+/**
+ * Upcomers-style accounts pay out on-demand rather than on a fixed cycle.
+ * This estimates what a payout request right now would be worth.
+ *
+ * grossProfit is raw price P&L only (sum of dollar_amount). netProfit
+ * subtracts broker commission and swap — the actual amount that affects
+ * real balance and what's really payable. Eligibility and the split
+ * amount are based on netProfit, not gross: a trade can show a positive
+ * gross result but a near-zero or negative net result once fees are
+ * counted, and that net figure is what actually matters for payout.
+ */
+export const estimatePayout = (account: Account, trades: Trade[]): PayoutEstimate => {
+  const accountTrades = trades.filter((t) => t.account_name === account.name);
+
+  const grossProfit = accountTrades.reduce((sum, t) => sum + t.dollar_amount, 0);
+  const netProfit = accountTrades.reduce(
+    (sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0),
+    0,
+  );
+
+  const splitAmount = Math.max(netProfit, 0) * (account.profitSplit / 100);
+
+  return {
+    accountId: account.id,
+    accountName: account.name,
+    grossProfit,
+    netProfit,
+    splitAmount,
+    eligible: netProfit > 0,
+  };
+};
+
+export const cumulativePayoutTotal = (entries: PayoutEstimate[]): number =>
+  entries.reduce((sum, e) => sum + e.splitAmount, 0);
+
+/**
+ * Recomputes an account's balance from scratch as startingBalance plus the
+ * sum of every logged trade's net effect (dollar_amount + commission + swap)
+ * for that account. Commission/swap are typically already-signed costs in
+ * MT5 data (negative), so summing them alongside dollar_amount gives the
+ * real balance — the same figure the live MT5 account would show. Used
+ * after bulk operations like CSV import so balance stays consistent with
+ * the log.
+ */
+export const recalculateBalance = (account: Account, trades: Trade[]): number => {
+  const total = trades
+    .filter((t) => t.account_name === account.name)
+    .reduce((sum, t) => sum + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0), 0);
+  return account.startingBalance + total;
+};
+
+/**
+ * Counts distinct calendar dates on which the account logged at least one
+ * trade. Reads straight from the trades in storage — not a stored counter.
+ */
+export const tradingDaysCompleted = (accountName: string, trades: Trade[]): number => {
+  const dates = new Set(
+    trades.filter((t) => t.account_name === accountName).map((t) => t.trade_date),
+  );
+  return dates.size;
+};
+
+export type ConsistencyCheck = {
   accountName: string;
-  grossProfit: number;
-  netProfit: number;
-  splitAmount: number;
+  totalProfit: number;
+  maxDayProfit: number;
+  maxDayDate: string | null;
+  maxDayPercent: number;
+  limit: number;
+  breached: boolean;
+};
+
+/**
+ * Consistency rule: no single calendar day's profit may account for more
+ * than the account's consistencyLimit percentage of total profit across all
+ * trading days. Recompute this after every trade is logged.
+ */
+export const checkConsistency = (account: Account, trades: Trade[]): ConsistencyCheck => {
+  const accountTrades = trades.filter((t) => t.account_name === account.name);
+
+  const dailyTotals = new Map<string, number>();
+  for (const t of accountTrades) {
+    // Grouped by NET profit (price P&L + commission + swap), not gross —
+    // confirmed against the real Upcomers dashboard: two trades netting
+    // $1.06 and $1.38 (after -$0.05 commission each) produce exactly the
+    // 56.56% best-day reading Upcomers shows. Gross-only grouping gives
+    // 56.30%, which doesn't match.
+    dailyTotals.set(
+      t.trade_date,
+      (dailyTotals.get(t.trade_date) ?? 0) + t.dollar_amount + (t.commission ?? 0) + (t.swap ?? 0),
+    );
+  }
+
+  const totalProfit = [...dailyTotals.values()].reduce((sum, v) => sum + v, 0);
+
+  let maxDayProfit = 0;
+  let maxDayDate: string | null = null;
+  for (const [date, profit] of dailyTotals.entries()) {
+    if (profit > maxDayProfit) {
+      maxDayProfit = profit;
+      maxDayDate = date;
+    }
+  }
+
+  const maxDayPercent = totalProfit > 0 ? (maxDayProfit / totalProfit) * 100 : 0;
+  const breached = totalProfit > 0 && maxDayPercent > account.consistencyLimit;
+
+  return {
+    accountName: account.name,
+    totalProfit,
+    maxDayProfit,
+    maxDayDate,
+    maxDayPercent,
+    limit: account.consistencyLimit,
+    breached,
+  };
+};
+
+export type ConsistencyStatus = 'safe' | 'warning' | 'breached' | 'early';
+
+/**
+ * Maps a ConsistencyCheck onto a graduated display state (used by both the
+ * Account Dashboard cards and the Payout Tracker) — the single place that
+ * decides what counts as "safe" vs "warning" vs "breached". No consistency
+ * math lives here, only the display-state thresholds.
+ */
+export const consistencyDisplayStatus = (
+  check: ConsistencyCheck,
+  dayCount: number,
+): ConsistencyStatus => {
+  if (check.totalProfit <= 0) return 'early';
+  if (check.breached) return 'breached';
+  const warningThreshold = check.limit - 5;
+  if (check.maxDayPercent >= warningThreshold) return 'warning';
+  if (dayCount < 2) return 'early';
+  return 'safe';
+};
+
+// Length of a reference period cycle, counted from the account's start
+// date. Upcomers' exact reference-period length wasn't specified — 30
+// days is the most common convention for this kind of rule at prop
+// firms, used here as the default. Adjust this constant if your actual
+// agreement specifies a different length.
+export const REFERENCE_PERIOD_DAYS = 30;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export type ReferencePeriodStatus = {
+  cycleNumber: number;
+  cycleStartDate: string;
+  cycleEndDate: string;
+  daysRemaining: number;
+  daysElapsed: number;
+};
+
+/**
+ * The reference period is a recurring window (REFERENCE_PERIOD_DAYS long)
+ * counted from the account's start date — cycle 1 is days 0-30, cycle 2 is
+ * days 30-60, and so on. Returns which cycle "today" falls in and how many
+ * days remain in it.
+ */
+export const referencePeriodStatus = (account: Account, today: Date = new Date()): ReferencePeriodStatus => {
+  const start = new Date(`${account.startDate}T00:00:00Z`);
+  const daysSinceStart = Math.max(0, Math.floor((today.getTime() - start.getTime()) / MS_PER_DAY));
+
+  const cycleNumber = Math.floor(daysSinceStart / REFERENCE_PERIOD_DAYS) + 1;
+  const daysElapsed = daysSinceStart % REFERENCE_PERIOD_DAYS;
+  const daysRemaining = REFERENCE_PERIOD_DAYS - daysElapsed;
+
+  const cycleStart = new Date(start.getTime() + (cycleNumber - 1) * REFERENCE_PERIOD_DAYS * MS_PER_DAY);
+  const cycleEnd = new Date(cycleStart.getTime() + REFERENCE_PERIOD_DAYS * MS_PER_DAY);
+
+  return {
+    cycleNumber,
+    cycleStartDate: cycleStart.toISOString().slice(0, 10),
+    cycleEndDate: cycleEnd.toISOString().slice(0, 10),
+    daysRemaining,
+    daysElapsed,
+  };
+};
+
+export type FirstWithdrawalStatus = {
+  firstTradeDate: string | null;
+  eligibleDate: string | null;
+  daysRemaining: number | null;
   eligible: boolean;
+};
+
+// Days after the first logged trade before a first withdrawal can be
+// requested, per the stated rule.
+export const FIRST_WITHDRAWAL_WAIT_DAYS = 14;
+
+/**
+ * First withdrawal eligibility: FIRST_WITHDRAWAL_WAIT_DAYS after the
+ * account's very first logged trade (not the account start date — the
+ * clock only starts once trading actually begins). Returns nulls if no
+ * trades have been logged yet, since there's no date to count from.
+ */
+export const firstWithdrawalStatus = (
+  accountName: string,
+  trades: Trade[],
+  today: Date = new Date(),
+): FirstWithdrawalStatus => {
+  const accountTrades = trades.filter((t) => t.account_name === accountName);
+  if (accountTrades.length === 0) {
+    return { firstTradeDate: null, eligibleDate: null, daysRemaining: null, eligible: false };
+  }
+
+  const firstTradeDate = accountTrades.reduce(
+    (earliest, t) => (t.trade_date < earliest ? t.trade_date : earliest),
+    accountTrades[0].trade_date,
+  );
+
+  const firstTrade = new Date(`${firstTradeDate}T00:00:00Z`);
+  const eligible = new Date(firstTrade.getTime() + FIRST_WITHDRAWAL_WAIT_DAYS * MS_PER_DAY);
+  const daysRemaining = Math.max(0, Math.ceil((eligible.getTime() - today.getTime()) / MS_PER_DAY));
+
+  return {
+    firstTradeDate,
+    eligibleDate: eligible.toISOString().slice(0, 10),
+    daysRemaining,
+    eligible: daysRemaining <= 0,
+  };
+};
+
+/**
+ * Hold duration in seconds, or null if either timestamp is missing —
+ * manually-logged trades have no time-of-day, only CSV-imported ones do.
+ */
+export const holdSeconds = (trade: Trade): number | null => {
+  if (!trade.open_time || !trade.close_time) return null;
+  const open = new Date(trade.open_time).getTime();
+  const close = new Date(trade.close_time).getTime();
+  if (Number.isNaN(open) || Number.isNaN(close)) return null;
+  return Math.max(0, (close - open) / 1000);
+};
+
+// Trades held under this many seconds are flagged as a possible
+// prohibited scalping strategy.
+export const PROHIBITED_HOLD_SECONDS = 60;
+
+/**
+ * True if a trade's hold time is below the prohibited threshold. Null
+ * (not true/false) when hold time can't be determined — this must never
+ * be treated as "not prohibited" by a caller, only as "unknown."
+ */
+export const isProhibitedHoldTime = (trade: Trade): boolean | null => {
+  const seconds = holdSeconds(trade);
+  if (seconds === null) return null;
+  return seconds < PROHIBITED_HOLD_SECONDS;
+};
+
+// --- Trade analytics -------------------------------------------------------
+// Mirrors the stats shown on prop-firm dashboards (upcomers.com, etc.):
+// win rate, order type mix, time-of-day activity, hold-duration analysis,
+// and a per-day P&L table. Several of these need open_time/close_time or
+// order_type, which only MT5-imported trades are guaranteed to have —
+// each function below documents what it does when that data is missing
+// rather than silently treating "unknown" as zero.
+
+export type WinRateStats = {
+  wins: number;
+  losses: number;
+  total: number;
+  winRatePercent: number; // 0 when total === 0
+};
+
+export const computeWinRate = (trades: Trade[]): WinRateStats => {
+  const wins = trades.filter((t) => t.result === 'win').length;
+  const losses = trades.filter((t) => t.result === 'loss').length;
+  const total = wins + losses;
+  return { wins, losses, total, winRatePercent: total > 0 ? (wins / total) * 100 : 0 };
+};
+
+export type OrderTypeStats = {
+  counts: Record<OrderType, number>;
+  percents: Record<OrderType, number>; // of trades that HAVE an order_type — see `tagged`
+  tagged: number; // trades with an order_type set
+  untagged: number; // trades with no order_type — excluded from percents
+};
+
+export const computeOrderTypeStats = (trades: Trade[]): OrderTypeStats => {
+  const counts: Record<OrderType, number> = { market: 0, limit: 0, stop: 0 };
+  let untagged = 0;
+
+  for (const t of trades) {
+    if (t.order_type) counts[t.order_type]++;
+    else untagged++;
+  }
+
+  const tagged = trades.length - untagged;
+  const percents: Record<OrderType, number> = {
+    market: tagged > 0 ? (counts.market / tagged) * 100 : 0,
+    limit: tagged > 0 ? (counts.limit / tagged) * 100 : 0,
+    stop: tagged > 0 ? (counts.stop / tagged) * 100 : 0,
+  };
+
+  return { counts, percents, tagged, untagged };
+};
+
+export type HourStats = {
+  hour: number; // 0-23, UTC
+  count: number;
+  totalPnL: number;
+  avgPnL: number;
+};
+
+export type IntradayActivity = {
+  hours: HourStats[]; // only hours with at least one trade, sorted by hour
+  bestHour: HourStats | null; // highest avgPnL
+  worstHour: HourStats | null; // lowest avgPnL
+  busiestHour: HourStats | null; // highest count
+  untimed: number; // trades with no open_time — excluded entirely
+};
+
+export const computeIntradayActivity = (trades: Trade[]): IntradayActivity => {
+  const byHour = new Map<number, { count: number; totalPnL: number }>();
+  let untimed = 0;
+
+  for (const t of trades) {
+    if (!t.open_time) {
+      untimed++;
+      continue;
+    }
+    const d = new Date(t.open_time);
+    if (Number.isNaN(d.getTime())) {
+      untimed++;
+      continue;
+    }
+    const hour = d.getUTCHours();
+    const bucket = byHour.get(hour) ?? { count: 0, totalPnL: 0 };
+    bucket.count++;
+    bucket.totalPnL += t.dollar_amount;
+    byHour.set(hour, bucket);
+  }
+
+  const hours: HourStats[] = Array.from(byHour.entries())
+    .map(([hour, b]) => ({ hour, count: b.count, totalPnL: b.totalPnL, avgPnL: b.totalPnL / b.count }))
+    .sort((a, b) => a.hour - b.hour);
+
+  const bestHour = hours.length ? hours.reduce((a, b) => (b.avgPnL > a.avgPnL ? b : a)) : null;
+  const worstHour = hours.length ? hours.reduce((a, b) => (b.avgPnL < a.avgPnL ? b : a)) : null;
+  const busiestHour = hours.length ? hours.reduce((a, b) => (b.count > a.count ? b : a)) : null;
+
+  return { hours, bestHour, worstHour, busiestHour, untimed };
+};
+
+// Hold-duration buckets, coarse enough to be meaningful with a modest
+// number of trades while still separating scalps from swing holds.
+export const DURATION_BUCKETS = [
+  { label: '<1m', maxSeconds: 60 },
+  { label: '1-15m', maxSeconds: 15 * 60 },
+  { label: '15-60m', maxSeconds: 60 * 60 },
+  { label: '1h+', maxSeconds: Infinity },
+] as const;
+export type DurationBucketLabel = (typeof DURATION_BUCKETS)[number]['label'];
+
+export type DurationBucketStats = {
+  label: DurationBucketLabel;
+  count: number;
+  totalPnL: number;
+  avgPnL: number;
+  wins: number;
+  winRatePercent: number;
+};
+
+export type DurationAnalysis = {
+  buckets: DurationBucketStats[]; // only buckets with at least one trade
+  mostProfitable: DurationBucketStats | null; // highest avgPnL
+  worst: DurationBucketStats | null; // lowest avgPnL
+  mostCommon: DurationBucketStats | null; // highest count
+  untimed: number; // trades missing open_time or close_time — excluded
+};
+
+export const computeDurationAnalysis = (trades: Trade[]): DurationAnalysis => {
+  const byBucket = new Map<DurationBucketLabel, { count: number; totalPnL: number; wins: number }>();
+  let untimed = 0;
+
+  for (const t of trades) {
+    const seconds = holdSeconds(t);
+    if (seconds === null) {
+      untimed++;
+      continue;
+    }
+    const bucket = DURATION_BUCKETS.find((b) => seconds < b.maxSeconds) ?? DURATION_BUCKETS[DURATION_BUCKETS.length - 1];
+    const entry = byBucket.get(bucket.label) ?? { count: 0, totalPnL: 0, wins: 0 };
+    entry.count++;
+    entry.totalPnL += t.dollar_amount;
+    if (t.result === 'win') entry.wins++;
+    byBucket.set(bucket.label, entry);
+  }
+
+  const buckets: DurationBucketStats[] = DURATION_BUCKETS.filter((b) => byBucket.has(b.label)).map((b) => {
+    const entry = byBucket.get(b.label)!;
+    return {
+      label: b.label,
+      count: entry.count,
+      totalPnL: entry.totalPnL,
+      avgPnL: entry.totalPnL / entry.count,
+      wins: entry.wins,
+      winRatePercent: (entry.wins / entry.count) * 100,
+    };
+  });
+
+  const mostProfitable = buckets.length ? buckets.reduce((a, b) => (b.avgPnL > a.avgPnL ? b : a)) : null;
+  const worst = buckets.length ? buckets.reduce((a, b) => (b.avgPnL < a.avgPnL ? b : a)) : null;
+  const mostCommon = buckets.length ? buckets.reduce((a, b) => (b.count > a.count ? b : a)) : null;
+
+  return { buckets, mostProfitable, worst, mostCommon, untimed };
+};
+
+export type TradingDayRow = {
+  date: string; // YYYY-MM-DD
+  profitUSD: number;
+  tradeCount: number;
+};
+
+// One row per calendar day that had at least one trade, most recent first.
+export const computeTradingDays = (trades: Trade[]): TradingDayRow[] => {
+  const byDate = new Map<string, { profitUSD: number; tradeCount: number }>();
+
+  for (const t of trades) {
+    const entry = byDate.get(t.trade_date) ?? { profitUSD: 0, tradeCount: 0 };
+    entry.profitUSD += t.dollar_amount;
+    entry.tradeCount++;
+    byDate.set(t.trade_date, entry);
+  }
+
+  return Array.from(byDate.entries())
+    .map(([date, v]) => ({ date, profitUSD: v.profitUSD, tradeCount: v.tradeCount }))
+    .sort((a, b) => b.date.localeCompare(a.date));
 };
