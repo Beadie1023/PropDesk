@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   BookOpen,
@@ -319,7 +320,7 @@ function ImportCsvModal({
     setImporting(false);
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 backdrop-blur-sm p-6"
       onClick={onClose}
@@ -415,7 +416,8 @@ function ImportCsvModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -554,7 +556,7 @@ function AddTradeModal({
     setSubmitting(false);
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/80 backdrop-blur-sm p-6"
       onClick={onClose}
@@ -833,7 +835,8 @@ function AddTradeModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
