@@ -326,10 +326,10 @@ function ImportCsvModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
+        className="w-full max-w-lg max-h-[90vh] flex flex-col rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700/60 text-accent-400">
               <Upload className="h-5 w-5" />
@@ -347,7 +347,7 @@ function ImportCsvModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
           {result.trades.length > 0 ? (
             <div className="flex items-start gap-2.5 rounded-lg border border-bull-500/30 bg-bull-500/10 p-3.5">
               <CheckCircle2 className="h-4 w-4 text-bull-400 mt-0.5 shrink-0" />
@@ -403,7 +403,7 @@ function ImportCsvModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50 shrink-0">
           <button onClick={onClose} className="btn-ghost">
             Cancel
           </button>
@@ -562,10 +562,10 @@ function AddTradeModal({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
+        className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border border-ink-600/60 bg-ink-850 shadow-2xl animate-slideIn"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-700/50 shrink-0">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink-700/60 text-accent-400">
               <Target className="h-5 w-5" />
@@ -585,7 +585,7 @@ function AddTradeModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-5">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1 min-h-0">
           {prefill && (
             <div className="flex items-start gap-2.5 rounded-lg border border-accent-500/30 bg-accent-500/10 p-3.5">
               <Target className="h-4 w-4 text-accent-400 mt-0.5 shrink-0" />
@@ -822,7 +822,7 @@ function AddTradeModal({
           </Field>
         </div>
 
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-ink-700/50 shrink-0">
           <button onClick={onClose} className="btn-ghost">
             Cancel
           </button>
