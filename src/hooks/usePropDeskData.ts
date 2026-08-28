@@ -70,24 +70,47 @@ export const usePropDeskData = (): DataState => {
         const updated = [newTrade, ...trades];
         setTrades(updated);
         saveTrades(updated);
+
+        const targetAccount = accounts.find((a) => a.name === trade.account_name);
+        if (targetAccount) {
+          const newBalance = recalculateBalance(targetAccount, updated);
+          const updatedAccounts = accounts.map((a) =>
+            a.id === targetAccount.id
+              ? { ...a, balance: newBalance, highWaterMark: Math.max(a.highWaterMark, newBalance) }
+              : a,
+          );
+          setAccounts(sortAccounts(updatedAccounts));
+          saveAccounts(updatedAccounts);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to save trade');
       }
     },
-    [trades],
+    [trades, accounts],
   );
 
   const deleteTrade = useCallback(
     async (id: string) => {
       try {
+        const removed = trades.find((t) => t.id === id);
         const updated = trades.filter((t) => t.id !== id);
         setTrades(updated);
         saveTrades(updated);
+
+        const targetAccount = removed && accounts.find((a) => a.name === removed.account_name);
+        if (targetAccount) {
+          const newBalance = recalculateBalance(targetAccount, updated);
+          const updatedAccounts = accounts.map((a) =>
+            a.id === targetAccount.id ? { ...a, balance: newBalance } : a,
+          );
+          setAccounts(sortAccounts(updatedAccounts));
+          saveAccounts(updatedAccounts);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to delete trade');
       }
     },
-    [trades],
+    [trades, accounts],
   );
 
   /**
