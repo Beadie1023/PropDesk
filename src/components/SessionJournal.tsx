@@ -527,12 +527,13 @@ function AddTradeModal({
 
     const commission = form.commission ? parseFloat(form.commission) : 0;
     const swap = form.swap ? parseFloat(form.swap) : 0;
-    // dollar_amount is the account's actual balance impact (gross P&L +
-    // commission + swap) — matching upcomers.com's Balance line, not
-    // just the raw Profit line — so this figure reconciles with the
-    // broker statement and every downstream stat (drawdown, consistency,
-    // payout estimate) reflects real account movement.
-    const balanceImpact = parseFloat(form.dollar_amount) + commission + swap;
+    // dollar_amount is stored as gross P&L only — same convention the MT5
+    // importer uses (see csvImport.ts). recalculateBalance adds
+    // commission + swap on top of dollar_amount when computing the
+    // account's actual balance, so storing the combined total here would
+    // double-count fees. The Balance Impact figure shown in the form
+    // above is a preview for the trader, not what gets saved to this
+    // field — commission/swap are saved separately below instead.
 
     await onSubmit({
       trade_date: form.trade_date,
@@ -544,7 +545,7 @@ function AddTradeModal({
       tp1: parseFloat(form.tp1),
       tp2: parseFloat(form.tp2),
       result: form.result,
-      dollar_amount: balanceImpact,
+      dollar_amount: parseFloat(form.dollar_amount),
       notes: form.notes.trim(),
       account_name: form.account_name,
       order_type: form.order_type || undefined,
