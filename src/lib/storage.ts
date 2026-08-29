@@ -1,13 +1,13 @@
 import type { Account, Trade } from '@/types';
+import { supabase } from '@/lib/supabaseClient';
 
-const ACCOUNTS_KEY = 'propdesk:accounts';
-const TRADES_KEY = 'propdesk:trades';
-const SEED_FLAG_KEY = 'propdesk:seeded';
-
-// Bump this whenever the Account/Trade shape changes. Anyone with older
-// cached localStorage data (e.g. from before the drawdown-model rewrite)
-// gets reseeded automatically instead of crashing on missing fields.
-const SCHEMA_VERSION = '6';
+// --- Legacy localStorage keys ----------------------------------------------
+// These are read-only now, purely to migrate whatever's sitting in a
+// browser's localStorage (from before this file moved to Supabase) up
+// to the database exactly once. New data never gets written here.
+const LEGACY_ACCOUNTS_KEY = 'propdesk:accounts';
+const LEGACY_TRADES_KEY = 'propdesk:trades';
+const MIGRATION_FLAG_KEY = 'propdesk:migrated-to-supabase';
 
 const SEED_ACCOUNTS: Account[] = [
   {
@@ -40,7 +40,9 @@ const SEED_ACCOUNTS: Account[] = [
 // Real trades from MT5 history (added manually — no CSV export available
 // at the time). Verified: net profit ($1.06 + $1.38 = $2.44) matches the
 // real account's Current Profit exactly, and the consistency % this
-// produces (56.56%) matches Upcomers' own dashboard exactly.
+// produces (56.56%) matches Upcomers' own dashboard exactly. Used only
+// as the seed for a brand-new (empty) Supabase project — see
+// migrateLegacyDataIfNeeded below.
 const SEED_TRADES: Trade[] = [
   {
     id: 'ember-real-1',
@@ -148,63 +150,133 @@ const isValidAccount = (a: unknown): a is Account => {
   );
 };
 
-export const loadAccounts = (): Account[] => {
-  ensureSeed();
-  const raw = localStorage.getItem(ACCOUNTS_KEY);
-  if (!raw) return [...SEED_ACCOUNTS];
+/**
+ * Reads whatever this browser's localStorage has under the old keys, if
+ * anything. Returns null for a piece of data that's missing or invalid —
+ * callers fall back to the hardcoded seed in that case, same as the old
+ * localStorage-only implementation did.
+ */
+const readLegacyLocalData = (): { accounts: Account[] | null; trades: Trade[] | null } => {
+  let accounts: Account[] | null = null;
+  let trades: Trade[] | null = null;
+
   try {
-    const parsed = JSON.parse(raw) as unknown[];
-    if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every(isValidAccount)) {
-      saveAccounts(SEED_ACCOUNTS);
-      return [...SEED_ACCOUNTS];
+    const raw = localStorage.getItem(LEGACY_ACCOUNTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown[];
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.every(isValidAccount)) {
+        accounts = parsed;
+      }
     }
-    return parsed;
   } catch {
-    return [...SEED_ACCOUNTS];
+    // Leave accounts as null — falls back to seed.
   }
-};
 
-export const saveAccounts = (accounts: Account[]): void => {
-  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
-};
-
-export const loadTrades = (): Trade[] => {
-  ensureSeed();
-  const raw = localStorage.getItem(TRADES_KEY);
-  if (!raw) return [...SEED_TRADES];
   try {
-    const parsed = JSON.parse(raw) as Trade[];
-    return sortTrades(parsed);
-  } catch {
-    return [...SEED_TRADES];
-  }
-};
-
-export const saveTrades = (trades: Trade[]): void => {
-  localStorage.setItem(TRADES_KEY, JSON.stringify(trades));
-};
-
-export const resetToSeed = (): void => {
-  localStorage.removeItem(ACCOUNTS_KEY);
-  localStorage.removeItem(TRADES_KEY);
-  localStorage.removeItem(SEED_FLAG_KEY);
-  ensureSeed();
-};
-
-const sortTrades = (trades: Trade[]): Trade[] =>
-  [...trades].sort((a, b) => {
-    if (a.trade_date !== b.trade_date) {
-      return a.trade_date < b.trade_date ? 1 : -1;
+    const raw = localStorage.getItem(LEGACY_TRADES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Trade[];
+      if (Array.isArray(parsed)) trades = parsed;
     }
-    return 0;
-  });
+  } catch {
+    // Leave trades as null — falls back to seed.
+  }
 
-const ensureSeed = (): void => {
-  const flagged = localStorage.getItem(SEED_FLAG_KEY);
-  if (flagged === SCHEMA_VERSION) return;
-  // Schema changed (or first run) — reseed both accounts and trades so
-  // stale/incompatible cached data doesn't linger.
-  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(SEED_ACCOUNTS));
-  localStorage.setItem(TRADES_KEY, JSON.stringify(SEED_TRADES));
-  localStorage.setItem(SEED_FLAG_KEY, SCHEMA_VERSION);
+  return { accounts, trades };
+};
+
+/**
+ * Runs once per browser. If the Supabase tables are empty, pushes up
+ * whatever this browser's localStorage has (or the hardcoded seed, if
+ * this is a genuinely fresh browser) so existing data isn't lost when
+ * switching over from the old localStorage-only version of this app.
+ * Marks itself done in localStorage afterward so it never re-runs and
+ * never re-uploads/duplicates rows on a later visit.
+ *
+ * Deliberately checks "is Supabase empty" rather than "have I migrated
+ * before" as the actual safety condition — if another browser/device
+ * already populated the database, this browser's local copy (which
+ * could be stale) is never pushed over it.
+ */
+const migrateLegacyDataIfNeeded = async (): Promise<void> => {
+  if (localStorage.getItem(MIGRATION_FLAG_KEY) === '1') return;
+
+  const { count, error: countError } = await supabase
+    .from('accounts')
+    .select('id', { count: 'exact', head: true });
+
+  if (countError) {
+    // Can't confirm the table is empty — skip migration this run rather
+    // than risk a duplicate push once connectivity is back. Will retry
+    // on the next load since the flag isn't set yet.
+    return;
+  }
+
+  if (count === 0) {
+    const legacy = readLegacyLocalData();
+    const accountsToSeed = legacy.accounts ?? SEED_ACCOUNTS;
+    const tradesToSeed = legacy.trades ?? SEED_TRADES;
+
+    const { error: accountsError } = await supabase.from('accounts').insert(accountsToSeed);
+    const { error: tradesError } = await supabase.from('trades').insert(tradesToSeed);
+
+    if (accountsError || tradesError) {
+      // Leave the flag unset so this is retried on the next load rather
+      // than silently leaving Supabase half-seeded.
+      return;
+    }
+  }
+
+  localStorage.setItem(MIGRATION_FLAG_KEY, '1');
+};
+
+export const loadAccounts = async (): Promise<Account[]> => {
+  await migrateLegacyDataIfNeeded();
+
+  const { data, error } = await supabase.from('accounts').select('*');
+  if (error) throw new Error(`Failed to load accounts: ${error.message}`);
+  return (data ?? []) as Account[];
+};
+
+export const saveAccounts = async (accounts: Account[]): Promise<void> => {
+  const { error } = await supabase.from('accounts').upsert(accounts, { onConflict: 'id' });
+  if (error) throw new Error(`Failed to save accounts: ${error.message}`);
+};
+
+export const loadTrades = async (): Promise<Trade[]> => {
+  await migrateLegacyDataIfNeeded();
+
+  const { data, error } = await supabase
+    .from('trades')
+    .select('*')
+    .order('trade_date', { ascending: false });
+  if (error) throw new Error(`Failed to load trades: ${error.message}`);
+  return (data ?? []) as Trade[];
+};
+
+export const saveTrades = async (trades: Trade[]): Promise<void> => {
+  const { error } = await supabase.from('trades').upsert(trades, { onConflict: 'id' });
+  if (error) throw new Error(`Failed to save trades: ${error.message}`);
+};
+
+/**
+ * Deletes a single trade by id. This is the correct removal path —
+ * saveTrades only upserts, so it can't remove a row Supabase already
+ * has.
+ */
+export const deleteTradeById = async (id: string): Promise<void> => {
+  const { error } = await supabase.from('trades').delete().eq('id', id);
+  if (error) throw new Error(`Failed to delete trade: ${error.message}`);
+};
+
+/**
+ * Wipes both tables and reseeds them. Useful for testing/debugging —
+ * not wired to any UI button by default.
+ */
+export const resetToSeed = async (): Promise<void> => {
+  await supabase.from('trades').delete().neq('id', '');
+  await supabase.from('accounts').delete().neq('id', '');
+  await supabase.from('accounts').insert(SEED_ACCOUNTS);
+  await supabase.from('trades').insert(SEED_TRADES);
+  localStorage.setItem(MIGRATION_FLAG_KEY, '1');
 };
