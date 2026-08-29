@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Account, Trade } from '@/types';
-import { genId, loadAccounts, loadTrades, saveAccounts, saveTrades } from '@/lib/storage';
+import { deleteTradeById, genId, loadAccounts, loadTrades, saveAccounts, saveTrades } from '@/lib/storage';
 import { recalculateBalance } from '@/lib/trading';
 
 type DataState = {
@@ -26,7 +26,7 @@ export const usePropDeskData = (): DataState => {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      setAccounts(sortAccounts(loadAccounts()));
+      setAccounts(sortAccounts(await loadAccounts()));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load accounts');
     }
@@ -34,7 +34,7 @@ export const usePropDeskData = (): DataState => {
 
   const refreshTrades = useCallback(async () => {
     try {
-      setTrades(loadTrades());
+      setTrades(await loadTrades());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load trades');
     }
@@ -55,7 +55,7 @@ export const usePropDeskData = (): DataState => {
           a.id === id ? { ...a, balance } : a,
         );
         setAccounts(sortAccounts(updated));
-        saveAccounts(updated);
+        await saveAccounts(updated);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to update balance');
       }
@@ -69,7 +69,7 @@ export const usePropDeskData = (): DataState => {
         const newTrade: Trade = { ...trade, id: genId() };
         const updated = [newTrade, ...trades];
         setTrades(updated);
-        saveTrades(updated);
+        await saveTrades([newTrade]);
 
         const targetAccount = accounts.find((a) => a.name === trade.account_name);
         if (targetAccount) {
@@ -80,7 +80,7 @@ export const usePropDeskData = (): DataState => {
               : a,
           );
           setAccounts(sortAccounts(updatedAccounts));
-          saveAccounts(updatedAccounts);
+          await saveAccounts(updatedAccounts.filter((a) => a.id === targetAccount.id));
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to save trade');
@@ -95,7 +95,7 @@ export const usePropDeskData = (): DataState => {
         const removed = trades.find((t) => t.id === id);
         const updated = trades.filter((t) => t.id !== id);
         setTrades(updated);
-        saveTrades(updated);
+        await deleteTradeById(id);
 
         const targetAccount = removed && accounts.find((a) => a.name === removed.account_name);
         if (targetAccount) {
@@ -104,7 +104,7 @@ export const usePropDeskData = (): DataState => {
             a.id === targetAccount.id ? { ...a, balance: newBalance } : a,
           );
           setAccounts(sortAccounts(updatedAccounts));
-          saveAccounts(updatedAccounts);
+          await saveAccounts(updatedAccounts.filter((a) => a.id === targetAccount.id));
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to delete trade');
@@ -114,11 +114,11 @@ export const usePropDeskData = (): DataState => {
   );
 
   /**
-   * Bulk-imports trades (e.g. from a CSV parse), persists them to
-   * localStorage, then recalculates the target account's balance from the
-   * full trade log. Trading days completed and the consistency check are
-   * derived live from `trades` elsewhere, so they update automatically once
-   * this state changes — no separate recompute step needed for those.
+   * Bulk-imports trades (e.g. from a CSV parse), persists them, then
+   * recalculates the target account's balance from the full trade log.
+   * Trading days completed and the consistency check are derived live
+   * from `trades` elsewhere, so they update automatically once this
+   * state changes — no separate recompute step needed for those.
    */
   const importTrades = useCallback(
     async (newTrades: Omit<Trade, 'id'>[], accountId: string) => {
@@ -126,7 +126,7 @@ export const usePropDeskData = (): DataState => {
         const withIds: Trade[] = newTrades.map((t) => ({ ...t, id: genId() }));
         const updatedTrades = [...withIds, ...trades];
         setTrades(updatedTrades);
-        saveTrades(updatedTrades);
+        await saveTrades(withIds);
 
         const targetAccount = accounts.find((a) => a.id === accountId);
         if (targetAccount) {
@@ -137,7 +137,7 @@ export const usePropDeskData = (): DataState => {
               : a,
           );
           setAccounts(sortAccounts(updatedAccounts));
-          saveAccounts(updatedAccounts);
+          await saveAccounts(updatedAccounts.filter((a) => a.id === accountId));
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to import trades');
