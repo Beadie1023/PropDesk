@@ -19,6 +19,13 @@ interface ImportMetaEnv {
   // Base URL for the AI Market Advisor endpoint. Defaults to /api/ai
   // (same-origin) — only needed if hosted separately from /api/metaapi.
   readonly VITE_AI_BACKEND_URL?: string;
+  // Supabase project credentials. Both required — see
+  // src/lib/supabaseClient.ts, which throws at startup if either is
+  // missing. The anon key is meant to be public (protected by the RLS
+  // policies in supabase/migration.sql), same category as the other
+  // VITE_ vars here.
+  readonly VITE_SUPABASE_URL: string;
+  readonly VITE_SUPABASE_ANON_KEY: string;
 }
 
 interface ImportMeta {
