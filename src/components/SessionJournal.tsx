@@ -208,10 +208,10 @@ export function SessionJournal({
                   {formatPrice(trade.entry_price)}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-slate-300">
-                  {trade.close_price !== undefined ? formatPrice(trade.close_price) : '—'}
+                  {trade.close_price != null ? formatPrice(trade.close_price) : '—'}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-slate-300">
-                  {trade.lots !== undefined ? trade.lots.toFixed(2) : '—'}
+                  {trade.lots != null ? trade.lots.toFixed(2) : '—'}
                 </td>
                 <td className="px-3 py-3 text-right stat-value text-bear-400/80">
                   {trade.source === 'mt5_import' ? '—' : formatPrice(trade.sl)}
