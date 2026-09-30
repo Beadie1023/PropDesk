@@ -110,23 +110,22 @@ export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | n
   return { direction, confidence, nearestBars: neighbors.length };
 }
 
-export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD'] as const;
+// Each currency is scored against TWO reference currencies (USD and EUR) so a
+// USD-specific move can't masquerade as GBP or AUD strength. Per reference,
+// the reading is RSI(14) of hourly closes, flipped (100 - RSI) when the
+// currency is the QUOTE side of the pair (EUR/GBP up = GBP weaker).
+// GBP and AUD scores are each the average of their two readings.
+export const CURRENCY_STRENGTH_PAIRS = ['GBP/USD', 'AUD/USD', 'EUR/GBP', 'EUR/AUD'] as const;
 export type CurrencyStrengthPair = (typeof CURRENCY_STRENGTH_PAIRS)[number];
 
-const STRENGTH_LOOKBACK_BARS = 24;
-const STRENGTH_DIFFERENTIAL_THRESHOLD = 10;
-const TYPICAL_DAILY_MOVE_PERCENT = 0.3;
+const STRENGTH_RSI_PERIOD = 14;
+const STRENGTH_DIFFERENTIAL_THRESHOLD = 10; // untuned starting point on the 0-100 RSI scale
 
-function scoreFromChange(changePercent: number): number {
-  return 50 + 50 * Math.tanh(changePercent / TYPICAL_DAILY_MOVE_PERCENT);
-}
-
-function pctChangeOverLookback(candles: Candle[]): number | null {
-  if (candles.length < STRENGTH_LOOKBACK_BARS + 1) return null;
-  const recent = candles[candles.length - 1].close;
-  const past = candles[candles.length - 1 - STRENGTH_LOOKBACK_BARS].close;
-  if (past === 0) return null;
-  return ((recent - past) / past) * 100;
+function lastRSI(candles: Candle[]): number | null {
+  if (candles.length <= STRENGTH_RSI_PERIOD) return null;
+  const rsi = computeRSI(candles.map((c) => c.close), STRENGTH_RSI_PERIOD);
+  const value = rsi[rsi.length - 1];
+  return Number.isNaN(value) ? null : value;
 }
 
 export type CurrencyStrengthResult = {
@@ -139,15 +138,17 @@ export type CurrencyStrengthResult = {
 export function computeCurrencyStrength(
   candlesByPair: Partial<Record<CurrencyStrengthPair, Candle[]>>,
 ): CurrencyStrengthResult | null {
-  const gbpusd = pctChangeOverLookback(candlesByPair['GBP/USD'] || []);
-  const audusd = pctChangeOverLookback(candlesByPair['AUD/USD'] || []);
+  const gbpUsd = lastRSI(candlesByPair['GBP/USD'] || []);
+  const audUsd = lastRSI(candlesByPair['AUD/USD'] || []);
+  const eurGbp = lastRSI(candlesByPair['EUR/GBP'] || []);
+  const eurAud = lastRSI(candlesByPair['EUR/AUD'] || []);
 
-  if (gbpusd === null || audusd === null) {
+  if (gbpUsd === null || audUsd === null || eurGbp === null || eurAud === null) {
     return null;
   }
 
-  const gbpScore = scoreFromChange(gbpusd);
-  const audScore = scoreFromChange(audusd);
+  const gbpScore = (gbpUsd + (100 - eurGbp)) / 2;
+  const audScore = (audUsd + (100 - eurAud)) / 2;
   const differential = gbpScore - audScore;
 
   let direction: SignalDirection = 'neutral';
