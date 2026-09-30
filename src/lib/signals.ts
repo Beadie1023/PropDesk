@@ -2,9 +2,10 @@
 // copy at server/lib/signals.js for the Lorentzian + currency-strength math
 // (it has no TypeScript build step) — if you change that algorithm here,
 // update the backend copy to match, or the panels and the phone
-// notifications could disagree with each other. Everything below that
-// point (kernel regression / position marker) is frontend-only display
-// logic and has no backend counterpart.
+// notifications could disagree with each other. The Trend Meter (MACD /
+// RSI / Stochastic) and its role in combineSignals ALSO need mirroring
+// there. Everything below the "Kernel regression" marker is frontend-only
+// display logic and has no backend counterpart.
 
 import type { Candle } from './marketData';
 import { computeKernelRegression as computeKernelPoints } from './kernelRegression';
@@ -156,23 +157,128 @@ export function computeCurrencyStrength(
   return { gbpScore, audScore, differential, direction };
 }
 
+// --- Trend Meter (MACD / RSI / Stochastic) ---------------------------------
+// Three oscillator "votes", each bullish or bearish on the latest candle:
+//   1. MACD(8,21,5): MACD line above its signal line
+//   2. RSI(13): above 50
+//   3. Stochastic %K(14): above 50
+// 3/3 bullish => bullish, 0/3 => bearish, anything else => neutral (mixed).
+// Used in combineSignals as a confirmation filter on strong signals only.
+// No verified edge — see the forward-outcome test before relying on it.
+
+const TM_MACD_FAST = 8;
+const TM_MACD_SLOW = 21;
+const TM_MACD_SIGNAL = 5;
+const TM_RSI_PERIOD = 13;
+const TM_STOCH_PERIOD = 14;
+const TM_MIN_CANDLES = 50;
+
+function computeEMA(values: number[], period: number): number[] {
+  const out = new Array(values.length).fill(NaN);
+  if (values.length < period) return out;
+  const k = 2 / (period + 1);
+  let sum = 0;
+  for (let i = 0; i < period; i++) sum += values[i];
+  let prev = sum / period;
+  out[period - 1] = prev;
+  for (let i = period; i < values.length; i++) {
+    prev = values[i] * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+function computeMACD(closes: number[], fast: number, slow: number, signal: number) {
+  const emaFast = computeEMA(closes, fast);
+  const emaSlow = computeEMA(closes, slow);
+  const macd = closes.map((_, i) =>
+    Number.isNaN(emaFast[i]) || Number.isNaN(emaSlow[i]) ? NaN : emaFast[i] - emaSlow[i],
+  );
+  const signalLine = new Array(closes.length).fill(NaN);
+  const first = macd.findIndex((v) => !Number.isNaN(v));
+  if (first >= 0) {
+    computeEMA(macd.slice(first), signal).forEach((v, j) => {
+      signalLine[first + j] = v;
+    });
+  }
+  return { macd, signalLine };
+}
+
+function computeStochasticK(candles: Candle[], period: number): number[] {
+  const out = new Array(candles.length).fill(NaN);
+  for (let i = period - 1; i < candles.length; i++) {
+    let highest = -Infinity;
+    let lowest = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      highest = Math.max(highest, candles[j].high);
+      lowest = Math.min(lowest, candles[j].low);
+    }
+    out[i] = highest === lowest ? 50 : ((candles[i].close - lowest) / (highest - lowest)) * 100;
+  }
+  return out;
+}
+
+export type TrendMeterSignal = {
+  direction: SignalDirection;
+  bullishCount: number; // 0-3 oscillators currently bullish
+};
+
+export function computeTrendMeterSignal(candles: Candle[]): TrendMeterSignal | null {
+  if (candles.length < TM_MIN_CANDLES) return null;
+
+  const closes = candles.map((c) => c.close);
+  const { macd, signalLine } = computeMACD(closes, TM_MACD_FAST, TM_MACD_SLOW, TM_MACD_SIGNAL);
+  const rsi = computeRSI(closes, TM_RSI_PERIOD);
+  const stochK = computeStochasticK(candles, TM_STOCH_PERIOD);
+
+  const last = closes.length - 1;
+  if ([macd[last], signalLine[last], rsi[last], stochK[last]].some((v) => Number.isNaN(v))) {
+    return null;
+  }
+
+  const bullishCount =
+    (macd[last] > signalLine[last] ? 1 : 0) + (rsi[last] > 50 ? 1 : 0) + (stochK[last] > 50 ? 1 : 0);
+
+  const direction: SignalDirection =
+    bullishCount === 3 ? 'bullish' : bullishCount === 0 ? 'bearish' : 'neutral';
+
+  return { direction, bullishCount };
+}
+
 export type OverallSignal = 'strong_buy' | 'buy' | 'neutral' | 'sell' | 'strong_sell' | 'conflicting';
 
 export function combineSignals(
   lorentzian: LorentzianSignal | null,
   currencyStrength: CurrencyStrengthResult | null,
+  trendMeter: TrendMeterSignal | null = null,
 ): OverallSignal {
   if (!lorentzian || !currencyStrength) return 'neutral';
 
   const l = lorentzian.direction;
   const c = currencyStrength.direction;
 
-  if (l === 'bullish' && c === 'bullish') return 'strong_buy';
-  if (l === 'bearish' && c === 'bearish') return 'strong_sell';
-  if ((l === 'bullish' && c === 'bearish') || (l === 'bearish' && c === 'bullish')) return 'conflicting';
-  if (l === 'bullish' || c === 'bullish') return 'buy';
-  if (l === 'bearish' || c === 'bearish') return 'sell';
-  return 'neutral';
+  let base: OverallSignal;
+  if (l === 'bullish' && c === 'bullish') base = 'strong_buy';
+  else if (l === 'bearish' && c === 'bearish') base = 'strong_sell';
+  else if ((l === 'bullish' && c === 'bearish') || (l === 'bearish' && c === 'bullish')) base = 'conflicting';
+  else if (l === 'bullish' || c === 'bullish') base = 'buy';
+  else if (l === 'bearish' || c === 'bearish') base = 'sell';
+  else base = 'neutral';
+
+  // Trend Meter is a confirmation filter on strong signals only: a strong
+  // signal needs all three oscillators to agree. Opposite reading =>
+  // conflicting; merely mixed => downgraded to a plain buy/sell.
+  // If the meter is unavailable (null), behavior is unchanged.
+  if (trendMeter) {
+    if (base === 'strong_buy' && trendMeter.direction !== 'bullish') {
+      return trendMeter.direction === 'bearish' ? 'conflicting' : 'buy';
+    }
+    if (base === 'strong_sell' && trendMeter.direction !== 'bearish') {
+      return trendMeter.direction === 'bullish' ? 'conflicting' : 'sell';
+    }
+  }
+
+  return base;
 }
 
 // --- Kernel regression + position marker -----------------------------------
