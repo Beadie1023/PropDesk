@@ -7,9 +7,11 @@ import {
   combineSignals,
   computeCurrencyStrength,
   computeLorentzianSignal,
+  computeTrendMeterSignal,
   type CurrencyStrengthResult,
   type LorentzianSignal,
   type OverallSignal,
+  type TrendMeterSignal,
 } from '@/lib/signals';
 
 const PAIR_SYMBOL = 'GBP/AUD';
@@ -29,6 +31,7 @@ type SignalState =
       status: 'ok';
       lorentzian: LorentzianSignal | null;
       currencyStrength: CurrencyStrengthResult | null;
+      trendMeter: TrendMeterSignal | null;
       overall: OverallSignal;
       computedAt: Date;
     };
@@ -99,9 +102,11 @@ export function SignalPanel() {
 
       const lorentzian = computeLorentzianSignal(gbpaud);
       const currencyStrength = computeCurrencyStrength(candlesByPair);
-      const overall = combineSignals(lorentzian, currencyStrength);
+      // Reuses the GBP/AUD candles already fetched above — no extra API calls.
+      const trendMeter = computeTrendMeterSignal(gbpaud);
+      const overall = combineSignals(lorentzian, currencyStrength, trendMeter);
 
-      setState({ status: 'ok', lorentzian, currencyStrength, overall, computedAt: new Date() });
+      setState({ status: 'ok', lorentzian, currencyStrength, trendMeter, overall, computedAt: new Date() });
 
       // Fire a notification only on a fresh crossing into Strong Buy/Sell —
       // not on every poll that happens to still be in that state.
@@ -110,7 +115,7 @@ export function SignalPanel() {
 
       if (isNewCrossing && notificationsEnabled && Notification.permission === 'granted') {
         new Notification(`PropDesk: ${OVERALL_LABEL[overall]} signal`, {
-          body: `GBP/AUD — Lorentzian + currency strength both ${overall === 'strong_buy' ? 'bullish' : 'bearish'}. Review before trading manually.`,
+          body: `GBP/AUD — Lorentzian, currency strength and trend meter all ${overall === 'strong_buy' ? 'bullish' : 'bearish'}. Review before trading manually.`,
           tag: 'propdesk-signal',
         });
       }
@@ -168,7 +173,7 @@ export function SignalPanel() {
   return (
     <Panel
       title="Signal Generator"
-      subtitle="GBP/AUD · Lorentzian classification + currency strength — for your review, not auto-traded"
+      subtitle="GBP/AUD · Lorentzian classification + currency strength + trend meter — for your review, not auto-traded"
       icon={<Sparkles className="h-5 w-5" />}
       action={
         <div className="flex items-center gap-2">
@@ -253,7 +258,7 @@ export function SignalPanel() {
             </div>
 
             {/* Breakdown */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-3.5">
                 <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-2">
                   Lorentzian Classification
@@ -311,6 +316,34 @@ export function SignalPanel() {
                   </>
                 ) : (
                   <p className="text-sm text-steel-500">Basket data unavailable</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-3.5">
+                <p className="text-[11px] text-steel-400 uppercase tracking-wider mb-2">Trend Meter</p>
+                {state.trendMeter ? (
+                  <>
+                    <p
+                      className={`stat-value text-lg font-semibold ${
+                        state.trendMeter.direction === 'bullish'
+                          ? 'text-bull-400'
+                          : state.trendMeter.direction === 'bearish'
+                            ? 'text-bear-400'
+                            : 'text-steel-300'
+                      }`}
+                    >
+                      {state.trendMeter.direction === 'bullish'
+                        ? 'Bullish'
+                        : state.trendMeter.direction === 'bearish'
+                          ? 'Bearish'
+                          : 'Mixed'}
+                    </p>
+                    <p className="text-[11px] text-steel-500 mt-1">
+                      {state.trendMeter.bullishCount} of 3 oscillators bullish (MACD · RSI · Stoch)
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-steel-500">Not enough history</p>
                 )}
               </div>
             </div>
