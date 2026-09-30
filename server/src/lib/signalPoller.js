@@ -4,7 +4,13 @@
 // SignalPanel.tsx does client-side (see the note in signals.js).
 
 import { fetchCandlesSequential, fetchTwelveDataCandles } from './marketData.js';
-import { CURRENCY_STRENGTH_PAIRS, combineSignals, computeCurrencyStrength, computeLorentzianSignal } from './signals.js';
+import {
+  CURRENCY_STRENGTH_PAIRS,
+  combineSignals,
+  computeCurrencyStrength,
+  computeLorentzianSignal,
+  computeTrendMeterSignal,
+} from './signals.js';
 import { sendNtfyNotification } from './notify.js';
 
 const PAIR_SYMBOL = 'GBP/AUD';
@@ -14,6 +20,11 @@ const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes — matches the frontend'
 // returning the same Strong Buy/Sell doesn't re-notify every cycle — only
 // a genuinely new crossing fires a notification.
 let lastNotifiedSignal = null;
+
+// The Trend Meter needs candles with numeric high/low. If the candle fetch
+// only keeps close, the meter returns null and the filter is silently
+// skipped — warn once so that doesn't go unnoticed.
+let warnedTrendMeterUnavailable = false;
 
 const OVERALL_LABEL = {
   strong_buy: 'Strong Buy',
@@ -34,7 +45,16 @@ async function runSignalCheck() {
 
     const lorentzian = computeLorentzianSignal(gbpaud);
     const currencyStrength = computeCurrencyStrength(candlesByPair);
-    const overall = combineSignals(lorentzian, currencyStrength);
+    // Reuses the GBP/AUD candles already fetched above — no extra API calls.
+    const trendMeter = computeTrendMeterSignal(gbpaud);
+    const overall = combineSignals(lorentzian, currencyStrength, trendMeter);
+
+    if (!trendMeter && !warnedTrendMeterUnavailable) {
+      console.warn(
+        'Signal poller: Trend Meter unavailable (not enough candles, or candles lack high/low) — strong signals are NOT being filtered by it.',
+      );
+      warnedTrendMeterUnavailable = true;
+    }
 
     const isStrongSignal = overall === 'strong_buy' || overall === 'strong_sell';
     const isNewCrossing = isStrongSignal && lastNotifiedSignal !== overall;
@@ -42,7 +62,7 @@ async function runSignalCheck() {
     if (isNewCrossing) {
       await sendNtfyNotification({
         title: `PropDesk: ${OVERALL_LABEL[overall]} signal`,
-        message: `GBP/AUD — Lorentzian + currency strength both ${
+        message: `GBP/AUD — Lorentzian, currency strength and trend meter all ${
           overall === 'strong_buy' ? 'bullish' : 'bearish'
         }. Review before trading manually.`,
         priority: 'high',
