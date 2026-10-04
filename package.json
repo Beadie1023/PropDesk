@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "test": "npx tsx --test src/lib/gate.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

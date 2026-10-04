@@ -17,6 +17,7 @@ import { RiskAlertPanel } from '@/components/RiskAlertPanel';
 import { SessionJournal } from '@/components/SessionJournal';
 import { ChartPanel } from '@/components/ChartPanel';
 import { SignalPanel } from '@/components/SignalPanel';
+import { ProbabilityGatePanel } from '@/components/ProbabilityGatePanel';
 import { AIAdvisorPanel } from '@/components/AIAdvisorPanel';
 import { ConsistencyPanel } from '@/components/ConsistencyPanel';
 import { TradeAnalyticsPanel } from '@/components/TradeAnalyticsPanel';
@@ -156,6 +157,7 @@ function App() {
               <RiskAlertPanel accounts={accounts} trades={trades} />
             </div>
             <ChartPanel onLogTradeSetup={setTradeSetupPrefill} />
+            <ProbabilityGatePanel accounts={accounts} trades={trades} />
             <SignalPanel />
             <AIAdvisorPanel />
             <ConsistencyPanel accounts={accounts} trades={trades} />
