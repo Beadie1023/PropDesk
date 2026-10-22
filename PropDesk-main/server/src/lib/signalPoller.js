@@ -33,7 +33,7 @@ const OVERALL_LABEL = {
 
 async function runSignalCheck() {
   try {
-    const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 2000);
+    const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
     const basket = await fetchCandlesSequential(
       CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
     );

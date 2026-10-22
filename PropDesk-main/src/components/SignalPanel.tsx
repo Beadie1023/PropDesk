@@ -90,9 +90,7 @@ export function SignalPanel() {
       // basket (genuinely distinct symbols, can't be cached away) is
       // fetched with a small stagger instead of all at once, to avoid
       // bursting the free-tier rate limit.
-      // ~2000 hourly bars: the 200 EMA/SMA filters and the classifier's training history need them,
-      // and it is the same request the Probability Gate makes (shared cache, no extra API call).
-      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 2000);
+      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
       const basket = await fetchCandlesSequential(
         CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
       );
@@ -286,11 +284,6 @@ export function SignalPanel() {
                       {state.lorentzian.confidence.toFixed(0)}% of {state.lorentzian.nearestBars} nearest
                       historical bars agreed
                     </p>
-                    {state.lorentzian.blockedBy.length > 0 && (
-                      <p className="text-[11px] text-warn-400 mt-1">
-                        Raw {state.lorentzian.rawDirection} signal blocked: {state.lorentzian.blockedBy.join('; ')}
-                      </p>
-                    )}
                   </>
                 ) : (
                   <p className="text-sm text-steel-500">Not enough history to classify</p>

@@ -31,13 +31,69 @@ function computeRSI(closes, period) {
   return rsi;
 }
 
-// The Lorentzian classifier lives in ./lorentzian.js, an auto-generated plain-JS copy of
-// src/lib/lorentzian.ts (TradingView settings: 5 features, 200 EMA/SMA, filters, kernel).
-// Regenerate it after editing the .ts file:  npm run sync:lorentzian  (in the repo root).
-import { computeLorentzian } from './lorentzian.js';
+function computeROC(closes, period) {
+  const roc = new Array(closes.length).fill(NaN);
+  for (let i = period; i < closes.length; i++) {
+    const past = closes[i - period];
+    if (past !== 0) roc[i] = ((closes[i] - past) / past) * 100;
+  }
+  return roc;
+}
+
+function lorentzianDistance(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    sum += Math.log(1 + Math.abs(a[i] - b[i]));
+  }
+  return sum;
+}
+
+const LOOKAHEAD_BARS = 4;
+const K_NEIGHBORS = 20;
+const BULLISH_THRESHOLD = 60;
+const BEARISH_THRESHOLD = 40;
 
 export function computeLorentzianSignal(candles) {
-  return computeLorentzian(candles);
+  const MIN_CANDLES = 60;
+  if (candles.length < MIN_CANDLES) return null;
+
+  const closes = candles.map((c) => c.close);
+  const rsi14 = computeRSI(closes, 14);
+  const rsi9 = computeRSI(closes, 9);
+  const roc10 = computeROC(closes, 10);
+
+  const points = [];
+  const minIdx = 15;
+  const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
+
+  for (let i = minIdx; i <= maxIdx; i++) {
+    if (Number.isNaN(rsi14[i]) || Number.isNaN(rsi9[i]) || Number.isNaN(roc10[i])) continue;
+    const future = closes[i + LOOKAHEAD_BARS];
+    const label = future > closes[i] ? 1 : 0;
+    points.push({ features: [rsi14[i], rsi9[i], roc10[i]], label });
+  }
+
+  if (points.length < K_NEIGHBORS) return null;
+
+  const lastIdx = closes.length - 1;
+  if (Number.isNaN(rsi14[lastIdx]) || Number.isNaN(rsi9[lastIdx]) || Number.isNaN(roc10[lastIdx])) {
+    return null;
+  }
+  const current = [rsi14[lastIdx], rsi9[lastIdx], roc10[lastIdx]];
+
+  const distances = points
+    .map((p) => ({ d: lorentzianDistance(current, p.features), label: p.label }))
+    .sort((a, b) => a.d - b.d);
+
+  const neighbors = distances.slice(0, K_NEIGHBORS);
+  const bullishVotes = neighbors.filter((n) => n.label === 1).length;
+  const confidence = (bullishVotes / neighbors.length) * 100;
+
+  let direction = 'neutral';
+  if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
+  else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
+
+  return { direction, confidence, neighborsUsed: neighbors.length };
 }
 
 // Each currency is scored against TWO reference currencies (USD and EUR) so a

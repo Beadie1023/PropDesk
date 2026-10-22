@@ -49,12 +49,7 @@ export function buildAnalysisPayload(
     recentHigh48h: recentHigh,
     recentLow48h: recentLow,
     lorentzianClassification: lorentzian
-      ? {
-          direction: lorentzian.direction,
-          rawDirection: lorentzian.rawDirection,
-          confidencePercent: lorentzian.confidence,
-          blockedBy: lorentzian.blockedBy,
-        }
+      ? { direction: lorentzian.direction, confidencePercent: lorentzian.confidence }
       : null,
     currencyStrength: currencyStrength
       ? {
