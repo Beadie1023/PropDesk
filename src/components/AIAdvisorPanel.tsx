@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Bot, Loader2, Sparkles, SlidersHorizontal } from 'lucide-react';
 import { Panel } from '@/components/ui';
 import { fetchCandlesSequential, fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
@@ -6,12 +6,14 @@ import {
   computeCurrencyStrength,
   computeLorentzianSignal,
   computeKernelRegression,
-  computePositionMarker,
   CURRENCY_STRENGTH_PAIRS,
   type CurrencyStrengthPair,
   type KernelResult,
-  type PositionMarker,
 } from '@/lib/signals';
+import { buildMarketContext } from '@/lib/bias';
+import { barsPerHour, signalBarsFor } from '@/lib/timeframe';
+import { useTimeframe } from '@/lib/useTimeframe';
+import { computeGatedMarker, type GatedMarker } from '@/lib/gatedMarker';
 import { analyzeMarket, type AIAnalysisResult } from '@/lib/aiAdvisor';
 
 const PAIR_SYMBOL = 'GBP/AUD';
@@ -19,7 +21,7 @@ const PAIR_SYMBOL = 'GBP/AUD';
 type PanelState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'ok'; analysis: string; computedAt: Date; kernel: KernelResult; marker: PositionMarker }
+  | { status: 'ok'; analysis: string; computedAt: Date; kernel: KernelResult; marker: GatedMarker }
   | { status: 'error'; message: string };
 
 const LORENTZIAN_FEATURES = [
@@ -50,13 +52,20 @@ const LORENTZIAN_KERNEL = [
 export function AIAdvisorPanel() {
   const [state, setState] = useState<PanelState>({ status: 'idle' });
   const [showConfig, setShowConfig] = useState(false);
+  const timeframe = useTimeframe();
+
+  // A read made on another timeframe would be misleading, so clear it when the timeframe changes.
+  useEffect(() => {
+    setState({ status: 'idle' });
+  }, [timeframe]);
 
   const runAnalysis = async () => {
     setState({ status: 'loading' });
     try {
-      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+      // Same bars as the Signal Generator and chart (shared, cached request).
+      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, timeframe, signalBarsFor(timeframe));
       const basket = await fetchCandlesSequential(
-        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: timeframe, outputsize: 40 })),
       );
       const candlesByPair: Partial<Record<CurrencyStrengthPair, Candle[]>> = {};
       CURRENCY_STRENGTH_PAIRS.forEach((symbol, i) => {
@@ -69,15 +78,21 @@ export function AIAdvisorPanel() {
       if (!kernel) {
         throw new Error('Not enough candle history to compute a kernel regression yet.');
       }
-      const marker = computePositionMarker(
-        gbpaud,
-        kernel.direction === 'neutral' ? 'bearish' : kernel.direction,
-      );
+      // Direction follows the classifier. If it is neutral, show the with-trend candidate
+      // (daily SMA50 bias) so there is still a gate-checked reference level.
+      const ctx = buildMarketContext(gbpaud);
+      const markerDirection =
+        lorentzian?.direction === 'bullish'
+          ? 'long'
+          : lorentzian?.direction === 'bearish'
+            ? 'short'
+            : (ctx?.bias ?? 'long');
+      const marker = computeGatedMarker(gbpaud, markerDirection);
       if (!marker) {
         throw new Error('Not enough candle history to size a position marker yet.');
       }
 
-      const result: AIAnalysisResult = await analyzeMarket(gbpaud, lorentzian, currencyStrength);
+      const result: AIAnalysisResult = await analyzeMarket(gbpaud, lorentzian, currencyStrength, barsPerHour(timeframe));
 
       if (result.status === 'ok') {
         setState({
@@ -275,8 +290,19 @@ export function AIAdvisorPanel() {
 
             <div className="rounded-lg border border-ink-600/40 bg-ink-900/30 p-4 space-y-3">
               <p className="text-[11px] text-steel-500 uppercase tracking-wide font-semibold">
-                Position Marker · 1:3 Risk/Reward
+                Position Marker · {state.marker.direction.toUpperCase()} · 1:{state.marker.ratio} Risk/Reward · structural stop
               </p>
+              <div
+                className={`rounded-md border px-3 py-2 text-xs ${
+                  state.marker.allowed
+                    ? 'border-bull-500/30 bg-bull-500/10 text-bull-300'
+                    : 'border-bear-500/30 bg-bear-500/10 text-bear-300'
+                }`}
+              >
+                {state.marker.allowed
+                  ? `Gate: ${state.marker.mode.toUpperCase()} (${state.marker.score}/3), stop ${state.marker.stopPips.toFixed(0)} pips.`
+                  : `Gate: BLOCKED, do not trade these levels. ${state.marker.reasons.slice(0, 2).join(' ')}`}
+              </div>
 
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs">

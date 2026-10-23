@@ -14,6 +14,12 @@ import {
 import { sendNtfyNotification } from './notify.js';
 
 const PAIR_SYMBOL = 'GBP/AUD';
+// Timeframe for the signals. Set SIGNAL_INTERVAL=1h on the server to use hourly candles;
+// the default is 30min to match the 30-minute chart. (The browser's 30m/1H toggle only
+// affects the web app: this server cannot read it, so keep the two in step by hand.)
+const SIGNAL_INTERVAL = process.env.SIGNAL_INTERVAL === '1h' ? '1h' : '30min';
+// 5000 x 30m is ~100 sessions of history; 2000 x 1h is ~80. Both cover the 2000-bar classifier.
+const SIGNAL_BARS = SIGNAL_INTERVAL === '30min' ? 5000 : 2000;
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes — matches the frontend's own polling cadence
 
 // Tracks the last signal we already notified about, so a poll that keeps
@@ -33,9 +39,9 @@ const OVERALL_LABEL = {
 
 async function runSignalCheck() {
   try {
-    const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+    const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, SIGNAL_INTERVAL, SIGNAL_BARS);
     const basket = await fetchCandlesSequential(
-      CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+      CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: SIGNAL_INTERVAL, outputsize: 40 })),
     );
 
     const candlesByPair = {};

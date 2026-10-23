@@ -3,7 +3,7 @@ import { AlertTriangle, Check, Copy, RefreshCw, ShieldCheck, X } from 'lucide-re
 import { Panel } from '@/components/ui';
 import { fetchTwelveDataCandles } from '@/lib/marketData';
 import { buildMarketContext, contextLevels, type Direction, type MarketContext } from '@/lib/bias';
-import { evaluateGate, type GateMode } from '@/lib/probabilityFactor';
+import { MIN_RR, TARGET_RR, evaluateGate, type GateMode } from '@/lib/probabilityFactor';
 import { lotsForRisk } from '@/lib/structuralRisk';
 import { scalingDecision } from '@/lib/scaling';
 import { PIP, RR_OPTIONS, drawdownBufferRemaining, formatCurrency, formatPrice, rrRatio } from '@/lib/trading';
@@ -53,7 +53,7 @@ function CheckRow({ pass, title, detail }: { pass: boolean | null; title: string
 export function ProbabilityGatePanel({ accounts, trades }: { accounts: Account[]; trades: Trade[] }) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [direction, setDirection] = useState<Direction>('short');
-  const [rr, setRr] = useState<RRKey>('1:3');
+  const [rr, setRr] = useState<RRKey>(`1:${TARGET_RR}` as RRKey);
   const [entryInput, setEntryInput] = useState('');
   const [stopInput, setStopInput] = useState('');
   const [riskPct, setRiskPct] = useState('0.25');
@@ -172,7 +172,9 @@ export function ProbabilityGatePanel({ accounts, trades }: { accounts: Account[]
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-steel-400 mb-2">Reward : risk</label>
+                <label className="block text-xs font-medium text-steel-400 mb-2">
+                  Reward : risk <span className="text-steel-500">(min 1:{MIN_RR}, aim 1:{TARGET_RR})</span>
+                </label>
                 <div className="flex gap-1.5 rounded-lg bg-ink-900/70 border border-ink-600/50 p-1">
                   {RR_OPTIONS.map((opt) => (
                     <button
@@ -269,6 +271,9 @@ export function ProbabilityGatePanel({ accounts, trades }: { accounts: Account[]
                   {gate.structuralRR !== null && ` (${gate.structuralRR.toFixed(1)}R from your stop)`}.
                 </li>
               )}
+              <li className={gate.rrOk ? 'text-bull-400' : 'text-bear-400 font-medium'}>
+                Minimum reward:risk 1:{MIN_RR} — {gate.rrOk ? 'met' : 'NOT met, trade blocked'}.
+              </li>
             </ul>
 
             {/* Level ladder */}

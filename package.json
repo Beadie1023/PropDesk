@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "typecheck": "tsc -b --noEmit",
-    "test": "npx tsx --test src/lib/gate.test.ts"
+    "test": "npx tsx --test src/lib/gate.test.ts src/lib/signals.test.ts src/lib/timeframe.test.ts",
+    "sync:lorentzian": "esbuild src/lib/lorentzian.ts --format=esm --target=es2022 --outfile=server/src/lib/lorentzian.js --log-level=warning",
+    "backtest": "npx tsx scripts/backtest.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",

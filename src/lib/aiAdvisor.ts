@@ -29,27 +29,35 @@ export function buildAnalysisPayload(
   candles: Candle[],
   lorentzian: LorentzianSignal | null,
   currencyStrength: CurrencyStrengthResult | null,
+  /** Candles per hour: 1 for 1H data, 2 for 30-minute data. Keeps the 24h / 5d / 48h windows true. */
+  barsPerHour: number = 1,
 ) {
   const closes = candles.map((c) => c.close);
   const current = closes[closes.length - 1];
-  const dayAgoIdx = Math.max(0, closes.length - 25); // ~24 hourly bars back
-  const weekAgoIdx = Math.max(0, closes.length - 121); // ~5 trading days of hourly bars
+  const dayAgoIdx = Math.max(0, closes.length - (24 * barsPerHour + 1)); // ~24 hours back
+  const weekAgoIdx = Math.max(0, closes.length - (120 * barsPerHour + 1)); // ~5 trading days back
   const dayAgo = closes[dayAgoIdx];
   const weekAgo = closes[weekAgoIdx];
 
-  const recentWindow = candles.slice(-48);
+  const recentWindow = candles.slice(-48 * barsPerHour); // last 48 hours
   const recentHigh = Math.max(...recentWindow.map((c) => c.high));
   const recentLow = Math.min(...recentWindow.map((c) => c.low));
 
   return {
     pair: 'GBP/AUD',
+    candleMinutes: Math.round(60 / barsPerHour),
     currentPrice: current,
     changeLast24hPercent: dayAgo ? ((current - dayAgo) / dayAgo) * 100 : null,
     changeLast5dPercent: weekAgo ? ((current - weekAgo) / weekAgo) * 100 : null,
     recentHigh48h: recentHigh,
     recentLow48h: recentLow,
     lorentzianClassification: lorentzian
-      ? { direction: lorentzian.direction, confidencePercent: lorentzian.confidence }
+      ? {
+          direction: lorentzian.direction,
+          rawDirection: lorentzian.rawDirection,
+          confidencePercent: lorentzian.confidence,
+          blockedBy: lorentzian.blockedBy,
+        }
       : null,
     currencyStrength: currencyStrength
       ? {
@@ -65,9 +73,10 @@ export async function analyzeMarket(
   candles: Candle[],
   lorentzian: LorentzianSignal | null,
   currencyStrength: CurrencyStrengthResult | null,
+  barsPerHour: number = 1,
 ): Promise<AIAnalysisResult> {
   try {
-    const payload = buildAnalysisPayload(candles, lorentzian, currencyStrength);
+    const payload = buildAnalysisPayload(candles, lorentzian, currencyStrength, barsPerHour);
     const res = await fetch(`${AI_API_BASE}/analyze`, {
       method: 'POST',
       headers: apiHeaders({ 'Content-Type': 'application/json' }),

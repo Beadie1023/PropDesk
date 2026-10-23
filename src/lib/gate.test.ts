@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 import type { Candle } from './marketData';
 import { aggregateToSessions, buildMarketContext, computeSMA, sessionKey, type MarketContext } from './bias';
-import { evaluateGate, zoneFavors } from './probabilityFactor';
+import { MIN_RR, TARGET_RR, evaluateGate, zoneFavors } from './probabilityFactor';
 import { lotsForRisk, suggestStop } from './structuralRisk';
 import { scalingDecision } from './scaling';
 
@@ -117,11 +117,31 @@ describe('probability gate', () => {
     assert.ok(g.structuralRR !== null && g.structuralRR > 3);
   });
 
-  it('counter-trend but feasible becomes a scalp', () => {
+  it('counter-trend scalp (1R) is blocked by the minimum reward:risk rule', () => {
     const ctx = { ...tsll, bias: 'long' as const, sma50: 90 };
     const g = evaluateGate({ ctx, direction: 'short', rr: 3, stopOptions: opts });
-    assert.equal(g.mode, 'scalp');
     assert.equal(g.effectiveRR, 1);
+    assert.equal(g.rrOk, false);
+    assert.equal(g.mode, 'blocked');
+  });
+
+  it('exposes the RR rules: minimum 1:2, target 1:3', () => {
+    assert.equal(MIN_RR, 2);
+    assert.equal(TARGET_RR, 3);
+  });
+
+  it('with-trend trade at 1:3 meets the minimum and is tagged minRR:ok', () => {
+    const g = evaluateGate({ ctx: tsll, direction: 'short', rr: 3, stopOptions: opts });
+    assert.equal(g.rrOk, true);
+    assert.ok(g.tag.includes('minRR:ok'));
+  });
+
+  it('blocks when the stop is so wide the next level is under 2R away', () => {
+    // 3 price-unit stop vs a ~2 unit move to the next level => well under 2R
+    const g = evaluateGate({ ctx: tsll, direction: 'short', rr: 3, stop: 103, stopOptions: opts });
+    assert.equal(g.rrOk, false);
+    assert.equal(g.mode, 'blocked');
+    assert.ok(g.tag.includes('minRR:fail'));
   });
 
   it('zero-distance stop is never feasible', () => {

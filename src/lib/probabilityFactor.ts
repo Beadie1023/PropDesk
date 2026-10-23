@@ -23,6 +23,14 @@ export const SIZE_MULTIPLIER: Record<GateMode, number> = {
 /** Counter-trend trades are scalps only, so test a small target. */
 export const SCALP_RR = 1;
 
+// Reward:risk rules (set from the trader's own journal: past trades ran ~1:1).
+//   MIN_RR    - anything planned or structurally capped below this is BLOCKED.
+//   TARGET_RR - the RR to aim for by default (1:3).
+// Set ENFORCE_MIN_RR to false if you ever want the gate to only warn.
+export const MIN_RR = 2;
+export const TARGET_RR = 3;
+export const ENFORCE_MIN_RR = true;
+
 /** Zone must be this lopsided to count (0.5 = exactly mid-way). */
 const ZONE_EDGE = 0.4;
 
@@ -61,6 +69,8 @@ export type GateResult = {
 
   target: { price: number; label: string } | null;
   structuralRR: number | null; // reward:risk to the next opposing level
+  /** True when planned RR and the next opposing level both give at least MIN_RR. */
+  rrOk: boolean;
 
   score: 0 | 1 | 2 | 3;
   mode: GateMode;
@@ -123,8 +133,15 @@ export function evaluateGate(input: GateInput): GateResult {
 
   const score = ((biasPoint ? 1 : 0) + (zonePoint ? 1 : 0) + (feasible ? 1 : 0)) as 0 | 1 | 2 | 3;
 
+  // Minimum reward:risk. The planned RR (counter-trend scalps drop to 1R) and the
+  // distance to the next opposing level must both clear MIN_RR.
+  const rrFailsPlanned = effectiveRR < MIN_RR;
+  const rrFailsStructure = structuralRR !== null && structuralRR < MIN_RR;
+  const rrOk = !(rrFailsPlanned || rrFailsStructure);
+
   let mode: GateMode;
-  if (!feasible) mode = 'blocked';
+  if (ENFORCE_MIN_RR && !rrOk) mode = 'blocked';
+  else if (!feasible) mode = 'blocked';
   else if (counterTrend) mode = 'scalp';
   else if (bias === null) mode = score >= 2 ? 'reduced' : 'blocked';
   else mode = score === 3 ? 'full' : 'reduced';
@@ -147,6 +164,13 @@ export function evaluateGate(input: GateInput): GateResult {
       `Target needs ${(requiredMove / ctx.atr * 100).toFixed(0)}% of ATR but only ${(remainingMove / ctx.atr * 100).toFixed(0)}% remains — reward likely unreachable.`,
     );
 
+  if (rrFailsPlanned)
+    reasons.push(`Planned reward:risk is only 1:${effectiveRR} — below the 1:${MIN_RR} minimum. Skip it.`);
+  if (rrFailsStructure && structuralRR !== null)
+    reasons.push(
+      `Next opposing level is only ${structuralRR.toFixed(1)}R away — below the ${MIN_RR}R minimum. Tighten the stop or wait for a better entry.`,
+    );
+
   if (usingSuggested) reasons.push(suggested.note + '.');
 
   const tag = [
@@ -156,6 +180,7 @@ export function evaluateGate(input: GateInput): GateResult {
     `zone:${zone ?? 'none'}`,
     `atrUsed:${atrUsedPct.toFixed(0)}%`,
     `rr:${rr}`,
+    `minRR:${rrOk ? 'ok' : 'fail'}`,
   ].join(' ');
 
   return {
@@ -177,6 +202,7 @@ export function evaluateGate(input: GateInput): GateResult {
     effectiveRR,
     target,
     structuralRR,
+    rrOk,
     score,
     mode,
     sizeMultiplier: SIZE_MULTIPLIER[mode],

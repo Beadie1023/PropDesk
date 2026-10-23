@@ -1,6 +1,7 @@
 // Frontend signal computation. The backend poller keeps a separate plain-JS
-// copy at server/lib/signals.js for the Lorentzian + currency-strength math
-// (it has no TypeScript build step) — if you change that algorithm here,
+// copy at server/src/lib/signals.js for the currency-strength math, and an
+// auto-generated copy of ./lorentzian at server/src/lib/lorentzian.js
+// (it has no TypeScript build step) — if you change an algorithm here,
 // update the backend copy to match, or the panels and the phone
 // notifications could disagree with each other. The Trend Meter (MACD /
 // RSI / Stochastic) and its role in combineSignals ALSO need mirroring
@@ -10,6 +11,7 @@
 import type { Candle } from './marketData';
 import { computeKernelRegression as computeKernelPoints } from './kernelRegression';
 import { computeATR, computeTrendFilter } from './trendFilter';
+import { computeLorentzian, type LorentzianResult } from './lorentzian';
 
 export type SignalDirection = 'bullish' | 'bearish' | 'neutral';
 
@@ -39,75 +41,13 @@ function computeRSI(closes: number[], period: number): number[] {
   return rsi;
 }
 
-function computeROC(closes: number[], period: number): number[] {
-  const roc = new Array(closes.length).fill(NaN);
-  for (let i = period; i < closes.length; i++) {
-    const past = closes[i - period];
-    if (past !== 0) roc[i] = ((closes[i] - past) / past) * 100;
-  }
-  return roc;
-}
-
-function lorentzianDistance(a: number[], b: number[]): number {
-  let sum = 0;
-  for (let i = 0; i < a.length; i++) {
-    sum += Math.log(1 + Math.abs(a[i] - b[i]));
-  }
-  return sum;
-}
-
-const LOOKAHEAD_BARS = 4;
-const K_NEIGHBORS = 20;
-const BULLISH_THRESHOLD = 60;
-const BEARISH_THRESHOLD = 40;
-
-export type LorentzianSignal = {
-  direction: SignalDirection;
-  confidence: number;
-  nearestBars: number;
-};
+// The Lorentzian classifier now lives in ./lorentzian (5 features, 8 neighbours, 200 EMA/SMA,
+// volatility/regime/ADX filters and the kernel filter, matching the TradingView settings).
+// It needs ~300+ hourly candles; fetch ~2000 (the same request the Probability Gate uses).
+export type LorentzianSignal = LorentzianResult;
 
 export function computeLorentzianSignal(candles: Candle[]): LorentzianSignal | null {
-  const MIN_CANDLES = 60;
-  if (candles.length < MIN_CANDLES) return null;
-
-  const closes = candles.map((c) => c.close);
-  const rsi14 = computeRSI(closes, 14);
-  const rsi9 = computeRSI(closes, 9);
-  const roc10 = computeROC(closes, 10);
-
-  const points: { features: number[]; label: number }[] = [];
-  const minIdx = 15;
-  const maxIdx = closes.length - 1 - LOOKAHEAD_BARS;
-
-  for (let i = minIdx; i <= maxIdx; i++) {
-    if (Number.isNaN(rsi14[i]) || Number.isNaN(rsi9[i]) || Number.isNaN(roc10[i])) continue;
-    const future = closes[i + LOOKAHEAD_BARS];
-    const label = future > closes[i] ? 1 : 0;
-    points.push({ features: [rsi14[i], rsi9[i], roc10[i]], label });
-  }
-
-  if (points.length < K_NEIGHBORS) return null;
-
-  const lastIdx = closes.length - 1;
-  if (Number.isNaN(rsi14[lastIdx]) || Number.isNaN(rsi9[lastIdx]) || Number.isNaN(roc10[lastIdx])) {
-    return null;
-  }
-  const current = [rsi14[lastIdx], rsi9[lastIdx], roc10[lastIdx]];
-
-  const distances = points
-    .map((p) => ({ d: lorentzianDistance(current, p.features), label: p.label }))
-    .sort((a, b) => a.d - b.d);
-
-  const neighbors = distances.slice(0, K_NEIGHBORS);
-  const bullishVotes = neighbors.filter((n) => n.label === 1).length;
-  const confidence = (bullishVotes / neighbors.length) * 100;
-
-  let direction: SignalDirection = 'neutral';
-  if (confidence >= BULLISH_THRESHOLD) direction = 'bullish';
-  else if (confidence <= BEARISH_THRESHOLD) direction = 'bearish';
-
-  return { direction, confidence, nearestBars: neighbors.length };
+  return computeLorentzian(candles);
 }
 
 // Each currency is scored against TWO reference currencies (USD and EUR) so a
@@ -325,6 +265,7 @@ export type PositionMarker = {
   ratio: number;
 };
 
+/** Legacy fixed 1-ATR marker. The panels now use computeGatedMarker (./gatedMarker). */
 export function computePositionMarker(
   candles: Candle[],
   direction: Exclude<SignalDirection, 'neutral'>,

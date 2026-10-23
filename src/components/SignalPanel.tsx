@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bell, BellOff, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { signalBarsFor, timeframeLabel } from '@/lib/timeframe';
+import { useTimeframe } from '@/lib/useTimeframe';
+import { TimeframeToggle } from '@/components/TimeframeToggle';
 import { Panel } from '@/components/ui';
 import { fetchCandlesSequential, fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 import {
@@ -81,6 +84,8 @@ export function SignalPanel() {
     setNotificationsEnabled(localStorage.getItem(NOTIFICATIONS_ENABLED_KEY) === '1');
   }, []);
 
+  const timeframe = useTimeframe();
+
   const runAnalysis = useCallback(async () => {
     setState({ status: 'loading' });
 
@@ -90,9 +95,11 @@ export function SignalPanel() {
       // basket (genuinely distinct symbols, can't be cached away) is
       // fetched with a small stagger instead of all at once, to avoid
       // bursting the free-tier rate limit.
-      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, '1h', 150);
+      // Thousands of bars of the selected timeframe: the 200 EMA/SMA filters and the
+      // classifier's training history need them. Shared (cached) with the chart and AI panel.
+      const gbpaud = await fetchTwelveDataCandles(PAIR_SYMBOL, timeframe, signalBarsFor(timeframe));
       const basket = await fetchCandlesSequential(
-        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: '1h', outputsize: 40 })),
+        CURRENCY_STRENGTH_PAIRS.map((symbol) => ({ symbol, interval: timeframe, outputsize: 40 })),
       );
 
       const candlesByPair: Partial<Record<(typeof CURRENCY_STRENGTH_PAIRS)[number], Candle[]>> = {};
@@ -132,7 +139,7 @@ export function SignalPanel() {
         message: err instanceof Error ? err.message : 'Failed to compute signal',
       });
     }
-  }, [notificationsEnabled]);
+  }, [notificationsEnabled, timeframe]);
 
   useEffect(() => {
     runAnalysis();
@@ -173,10 +180,11 @@ export function SignalPanel() {
   return (
     <Panel
       title="Signal Generator"
-      subtitle="GBP/AUD · Lorentzian classification + currency strength + trend meter — for your review, not auto-traded"
+      subtitle={`GBP/AUD · ${timeframeLabel(timeframe)} Lorentzian classification + currency strength + trend meter — for your review, not auto-traded`}
       icon={<Sparkles className="h-5 w-5" />}
       action={
         <div className="flex items-center gap-2">
+          <TimeframeToggle />
           <button onClick={toggleNotifications} className="btn-ghost" title="Notify on Strong Buy/Sell signals">
             {notificationsEnabled ? <Bell className="h-4 w-4 text-accent-400" /> : <BellOff className="h-4 w-4" />}
             {notificationsEnabled ? 'Notifications on' : 'Notify me'}
@@ -197,7 +205,7 @@ export function SignalPanel() {
         <div className="flex items-start gap-2.5 rounded-lg border border-ink-600/40 bg-ink-900/40 p-3">
           <AlertTriangle className="h-4 w-4 text-steel-400 mt-0.5 shrink-0" />
           <p className="text-[11px] text-steel-400 leading-relaxed">
-            Heuristic signal only, no verified track record. Upcomers doesn't permit automated
+            Heuristic signal only. A backtest on about 3 months of GBP/AUD 30-minute data showed no edge (docs/BACKTEST_RESULTS.md), so use it as context, not as an entry trigger. Upcomers doesn't permit automated
             execution on this account — review and place trades manually. Not financial advice.
           </p>
         </div>
@@ -284,6 +292,11 @@ export function SignalPanel() {
                       {state.lorentzian.confidence.toFixed(0)}% of {state.lorentzian.nearestBars} nearest
                       historical bars agreed
                     </p>
+                    {state.lorentzian.blockedBy.length > 0 && (
+                      <p className="text-[11px] text-warn-400 mt-1">
+                        Raw {state.lorentzian.rawDirection} signal blocked: {state.lorentzian.blockedBy.join('; ')}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p className="text-sm text-steel-500">Not enough history to classify</p>

@@ -18,8 +18,12 @@ import { Panel } from '@/components/ui';
 import { fetchTwelveDataCandles, type Candle } from '@/lib/marketData';
 import { computeSupportResistance } from '@/lib/levels';
 import { computeKernelRegression } from '@/lib/kernelRegression';
-import { computeATR, computeTrendFilter } from '@/lib/trendFilter';
 import { computeLorentzianSignal } from '@/lib/signals';
+import { computeGatedMarker } from '@/lib/gatedMarker';
+import { chartBarsFor, signalBarsFor, timeframeLabel } from '@/lib/timeframe';
+import { useTimeframe } from '@/lib/useTimeframe';
+import { TimeframeToggle } from '@/components/TimeframeToggle';
+import { TARGET_RR } from '@/lib/probabilityFactor';
 import type { TradeSetupPrefill } from '@/types';
 
 // This chart is hardcoded to a single pair — no selector.
@@ -121,8 +125,7 @@ function toChartData(candles: Candle[]) {
 const RESISTANCE_COLOR = '#f87171';
 const SUPPORT_COLOR = '#4ade80';
 const ENTRY_COLOR = '#e2e8f0';
-const TREND_FILTER_THRESHOLD = -0.1;
-const RISK_REWARD_RATIO = 3; // 1:3 — SL distance × 3 = TP distance
+const RISK_REWARD_RATIO = TARGET_RR; // 1:3 default — SL distance × 3 = TP distance
 // Bars back to compare when deciding the kernel line's color — matches
 // computeKernelRegression's default `lookback` (its own smoothing
 // window), so color changes track sustained moves rather than
@@ -148,7 +151,10 @@ export function ChartPanel({
   // The setup currently drawn on the chart (entry/SL/TP + direction),
   // kept in sync with drawPositionMarker below. Null whenever trend
   // filter + Lorentzian don't agree, i.e. nothing to log.
+  const timeframe = useTimeframe();
   const [activeSetup, setActiveSetup] = useState<TradeSetupPrefill | null>(null);
+  // Why there is no setup right now (shown above the chart).
+  const [setupNote, setSetupNote] = useState<string | null>(null);
 
   // Draws the kernel regression trend line from RAW candles — same
   // reasoning as support/resistance: this should reflect real price
@@ -231,7 +237,7 @@ export function ChartPanel({
   // latest bar plus Entry/SL/TP price lines sized to a 1:3 risk:reward
   // ratio via ATR — never auto-traded, purely a visual "if you were to
   // take this setup" reference.
-  function drawPositionMarker(rawCandles: Candle[]) {
+  function drawPositionMarker(signalCandles: Candle[]) {
     const series = seriesRef.current;
     const markersPlugin = markersPluginRef.current;
     if (!series || !markersPlugin) return;
@@ -240,26 +246,39 @@ export function ChartPanel({
     positionLinesRef.current = [];
     markersPlugin.setMarkers([]);
 
-    const lorentzian = computeLorentzianSignal(rawCandles);
-    const trend = computeTrendFilter(rawCandles, 20, TREND_FILTER_THRESHOLD);
-
-    if (!lorentzian || !trend || !trend.trending || lorentzian.direction === 'neutral') {
+    // `signalCandles` should be ~2000+ bars of the selected timeframe (the 200 EMA/SMA filters need them).
+    const lorentzian = computeLorentzianSignal(signalCandles);
+    if (!lorentzian) {
       setActiveSetup(null);
+      setSetupNote('Not enough history to classify yet.');
+      return;
+    }
+    if (lorentzian.direction === 'neutral') {
+      setActiveSetup(null);
+      setSetupNote(
+        lorentzian.blockedBy.length > 0
+          ? `No setup: raw ${lorentzian.rawDirection} signal blocked (${lorentzian.blockedBy.join('; ')}).`
+          : 'No setup: the Lorentzian signal is neutral.',
+      );
       return;
     }
 
-    const atr = computeATR(rawCandles, 14);
-    if (!atr || atr <= 0) {
-      setActiveSetup(null);
-      return;
-    }
-
-    const lastCandle = rawCandles[rawCandles.length - 1];
     const isBullish = lorentzian.direction === 'bullish';
-    const entry = lastCandle.close;
-    const slDistance = atr;
-    const sl = isBullish ? entry - slDistance : entry + slDistance;
-    const tp = isBullish ? entry + slDistance * RISK_REWARD_RATIO : entry - slDistance * RISK_REWARD_RATIO;
+    // Stop and target come from the Probability Gate (structural stop, 1:3 target, 1:2 minimum).
+    const marker = computeGatedMarker(signalCandles, isBullish ? 'long' : 'short', RISK_REWARD_RATIO);
+    if (!marker || !marker.allowed) {
+      setActiveSetup(null);
+      setSetupNote(
+        `Signal is ${lorentzian.direction}, but the gate blocks the trade. ${(marker?.reasons ?? []).slice(0, 2).join(' ')}`.trim(),
+      );
+      return;
+    }
+
+    const lastCandle = signalCandles[signalCandles.length - 1];
+    const entry = marker.entry;
+    const sl = marker.stopLoss;
+    const tp = marker.takeProfit;
+    setSetupNote(null);
 
     setActiveSetup({
       pair: PAIR_LABEL,
@@ -387,15 +406,23 @@ export function ChartPanel({
     let cancelled = false;
     setLoading(true);
 
-    fetchTwelveDataCandles(TWELVEDATA_SYMBOL, '1h', 150)
+    fetchTwelveDataCandles(TWELVEDATA_SYMBOL, timeframe, chartBarsFor(timeframe))
       .then((candles) => {
         if (cancelled) return;
         seriesRef.current?.setData(toChartData(toHeikinAshi(candles)));
         drawSupportResistance(candles);
         drawKernelRegression(candles);
-        drawPositionMarker(candles);
         chartRef.current?.timeScale().fitContent();
         setUsingSampleData(false);
+        // Signals need far more history than the chart shows (see signalBarsFor). Shared and
+        // cached with the Signal Generator and AI panels, so it is one API call between them.
+        fetchTwelveDataCandles(TWELVEDATA_SYMBOL, timeframe, signalBarsFor(timeframe))
+          .then((signalCandles) => {
+            if (!cancelled) drawPositionMarker(signalCandles);
+          })
+          .catch(() => {
+            if (!cancelled) drawPositionMarker(candles);
+          });
       })
       .catch(() => {
         if (cancelled) return;
@@ -414,7 +441,8 @@ export function ChartPanel({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeframe]);
 
   return (
     <Panel
@@ -422,28 +450,32 @@ export function ChartPanel({
       subtitle={
         usingSampleData
           ? 'Heikin Ashi candles + support/resistance — sample data (Twelve Data unavailable)'
-          : 'Heikin Ashi candles + support/resistance — live 1H data from Twelve Data'
+          : `Heikin Ashi candles + support/resistance — live ${timeframeLabel(timeframe)} data from Twelve Data`
       }
       icon={<LineChart className="h-5 w-5" />}
       action={
-        onLogTradeSetup && (
+        <div className="flex items-center gap-2">
+          <TimeframeToggle />
+          {onLogTradeSetup && (
           <button
             onClick={() => activeSetup && onLogTradeSetup(activeSetup)}
             disabled={!activeSetup}
             title={
               activeSetup
                 ? `Log ${activeSetup.direction.toUpperCase()} @ ${activeSetup.entry_price.toFixed(5)}`
-                : 'No active setup — trend filter and Lorentzian signal must agree'
+                : 'No active setup — the Lorentzian signal and the Probability Gate must both agree'
             }
             className="btn-primary disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Target className="h-4 w-4" />
             Log This Trade
           </button>
-        )
+          )}
+        </div>
       }
     >
       <div className="p-5">
+        {setupNote && <p className="mb-3 text-xs text-warn-400">{setupNote}</p>}
         <div className="relative w-full h-[400px]">
           <div ref={containerRef} className="w-full h-full" />
           {loading && (
